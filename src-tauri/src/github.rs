@@ -37,7 +37,11 @@ impl Github {
         Ok(Self { token, client })
     }
 
-    async fn graphql<T: DeserializeOwned>(&self, query: &str, vars: serde_json::Value) -> Result<T> {
+    async fn graphql<T: DeserializeOwned>(
+        &self,
+        query: &str,
+        vars: serde_json::Value,
+    ) -> Result<T> {
         let resp = self
             .client
             .post(GRAPHQL_URL)
@@ -193,7 +197,9 @@ impl Github {
             }
         "#;
 
-        let resp: Resp = self.graphql(query, json!({ "q": q, "limit": limit })).await?;
+        let resp: Resp = self
+            .graphql(query, json!({ "q": q, "limit": limit }))
+            .await?;
         Ok(resp
             .search
             .nodes
@@ -460,7 +466,10 @@ impl RawPr {
     }
 
     pub fn review_list(&self) -> &[RawReview] {
-        self.reviews.as_ref().map(|r| r.nodes.as_slice()).unwrap_or(&[])
+        self.reviews
+            .as_ref()
+            .map(|r| r.nodes.as_slice())
+            .unwrap_or(&[])
     }
 
     pub fn head_oid(&self) -> String {

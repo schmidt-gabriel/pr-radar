@@ -24,7 +24,10 @@ const BOTS: &[&str] = &[
 
 fn is_bot(login: &str) -> bool {
     let lower = login.to_ascii_lowercase();
-    lower.ends_with("[bot]") || BOTS.iter().any(|b| lower == *b || lower == format!("{b}[bot]"))
+    lower.ends_with("[bot]")
+        || BOTS
+            .iter()
+            .any(|b| lower == *b || lower == format!("{b}[bot]"))
 }
 
 fn ticket_re() -> &'static Regex {
@@ -109,12 +112,18 @@ fn build_checks(contexts: &[RawContext]) -> Vec<Check> {
 }
 
 fn build_ci(checks: &[Check]) -> Ci {
-    let failed = checks.iter().filter(|c| c.state == CheckState::Fail).count();
+    let failed = checks
+        .iter()
+        .filter(|c| c.state == CheckState::Fail)
+        .count();
     let pending = checks
         .iter()
         .filter(|c| c.state == CheckState::Pending)
         .count();
-    let passed = checks.iter().filter(|c| c.state == CheckState::Pass).count();
+    let passed = checks
+        .iter()
+        .filter(|c| c.state == CheckState::Pass)
+        .count();
 
     let state = if checks.is_empty() {
         CiState::None
@@ -389,8 +398,7 @@ fn collapse_timeline(entries: Vec<TimelineEntry>, now: DateTime<Utc>) -> Vec<Tim
     let mut out: Vec<TimelineEntry> = Vec::with_capacity(entries.len());
     for e in entries {
         let fold = out.last().is_some_and(|prev| {
-            split_count(&prev.text).0 == e.text
-                && (e.at - prev.at).num_seconds().abs() <= WINDOW
+            split_count(&prev.text).0 == e.text && (e.at - prev.at).num_seconds().abs() <= WINDOW
         });
 
         if fold {
@@ -530,7 +538,7 @@ fn order_queue(items: Vec<QueuePr>) -> Vec<QueuePr> {
     requested.sort_by_key(|p| p.created_at);
     partial.sort_by_key(|p| p.created_at);
     // Newest first: catch fresh PRs before they go stale.
-    no_approval.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    no_approval.sort_by_key(|p| std::cmp::Reverse(p.created_at));
 
     let mut out = requested;
     out.extend(no_approval);
@@ -702,26 +710,30 @@ pub fn derive_events(
 
         // "Review requested from you" has no timestamp on the request itself;
         // the PR's last update is the closest honest anchor.
-        if !is_mine && pr.requested_reviewers().iter().any(|r| my_handles.contains(r)) {
-            if pr.updated_at >= horizon {
-                events.push(Event {
-                    id: format!("{}:review_requested", pr.id()),
-                    at: pr.updated_at,
-                    kind: EventKind::ReviewRequested,
-                    headline: "Review requested from you".into(),
-                    detail: format!("by {author}"),
-                    slug: slug.clone(),
-                    title: pr.title.clone(),
-                    url: pr.url.clone(),
-                    mine: false,
-                });
-            }
+        if !is_mine
+            && pr.updated_at >= horizon
+            && pr
+                .requested_reviewers()
+                .iter()
+                .any(|r| my_handles.contains(r))
+        {
+            events.push(Event {
+                id: format!("{}:review_requested", pr.id()),
+                at: pr.updated_at,
+                kind: EventKind::ReviewRequested,
+                headline: "Review requested from you".into(),
+                detail: format!("by {author}"),
+                slug: slug.clone(),
+                title: pr.title.clone(),
+                url: pr.url.clone(),
+                mine: false,
+            });
         }
     }
 
     let mut seen = HashSet::new();
     events.retain(|e| seen.insert(e.id.clone()));
-    events.sort_by(|a, b| b.at.cmp(&a.at));
+    events.sort_by_key(|e| std::cmp::Reverse(e.at));
     let mut events = collapse_bursts(events);
     events.truncate(120);
     events
@@ -840,7 +852,10 @@ mod tests {
             parse_ticket("fix(CORE-1616): correct RAG scoring"),
             Some("CORE-1616".into())
         );
-        assert_eq!(parse_ticket("PLAT-217 | Add audit logging"), Some("PLAT-217".into()));
+        assert_eq!(
+            parse_ticket("PLAT-217 | Add audit logging"),
+            Some("PLAT-217".into())
+        );
         assert_eq!(parse_ticket("Add golangci-lint gate"), None);
     }
 

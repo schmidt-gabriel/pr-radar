@@ -5,7 +5,7 @@ use anyhow::Result;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::derive;
 use crate::github::{Github, Viewer};
@@ -33,14 +33,14 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn load(dir: &PathBuf) -> Self {
+    pub fn load(dir: &Path) -> Self {
         std::fs::read_to_string(dir.join("config.json"))
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default()
     }
 
-    pub fn save(&self, dir: &PathBuf) {
+    pub fn save(&self, dir: &Path) {
         let _ = std::fs::create_dir_all(dir);
         if let Ok(json) = serde_json::to_string_pretty(self) {
             let _ = std::fs::write(dir.join("config.json"), json);
@@ -112,11 +112,11 @@ pub struct SeenStore {
 }
 
 impl SeenStore {
-    fn path(dir: &PathBuf) -> PathBuf {
+    fn path(dir: &Path) -> PathBuf {
         dir.join("seen-events.json")
     }
 
-    pub fn load(dir: &PathBuf) -> (HashSet<String>, bool) {
+    pub fn load(dir: &Path) -> (HashSet<String>, bool) {
         match std::fs::read_to_string(Self::path(dir))
             .ok()
             .and_then(|s| serde_json::from_str::<SeenStore>(&s).ok())
@@ -128,7 +128,7 @@ impl SeenStore {
         }
     }
 
-    pub fn save(dir: &PathBuf, seen: &HashSet<String>) {
+    pub fn save(dir: &Path, seen: &HashSet<String>) {
         let _ = std::fs::create_dir_all(dir);
         // Unbounded growth would make this file creep; the horizon on events is
         // 14 days, so a few hundred ids is far more than enough.

@@ -22,7 +22,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    println!("viewer   {} (teams: {})", snap.viewer, snap.teams.join(", "));
+    println!(
+        "viewer   {} (teams: {})",
+        snap.viewer,
+        snap.teams.join(", ")
+    );
     println!("org      {}", snap.org);
     println!();
 
@@ -94,7 +98,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
     println!("MERGED — last {}", snap.merged.len());
     for pr in snap.merged.iter().take(5) {
-        println!("  {:28} {:>4}  {}", pr.slug, pr.age, truncate(&pr.title, 52));
+        println!(
+            "  {:28} {:>4}  {}",
+            pr.slug,
+            pr.age,
+            truncate(&pr.title, 52)
+        );
     }
 
     Ok(())

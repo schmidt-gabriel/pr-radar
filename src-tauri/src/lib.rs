@@ -389,8 +389,7 @@ pub fn run() {
             // --- tray ---------------------------------------------------------
             // Linux appindicator delivers no click events, so the popover needs
             // a menu entry or it is unreachable except by global shortcut.
-            let status_item =
-                MenuItem::with_id(app, "status", "Connecting…", false, None::<&str>)?;
+            let status_item = MenuItem::with_id(app, "status", "Connecting…", false, None::<&str>)?;
             let popover_item =
                 MenuItem::with_id(app, "popover", "Show popover", true, None::<&str>)?;
             let open_item = MenuItem::with_id(app, "open", "Open PR Radar", true, None::<&str>)?;
