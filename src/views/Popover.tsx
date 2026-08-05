@@ -7,14 +7,13 @@ import { displayAge, syncedAgo } from "../lib/format";
 import { chord, hasMod } from "../lib/platform";
 import type { MineBucket, MinePr, QueuePr, Snapshot } from "../lib/types";
 import {
-  CiBadge,
+  ciShort,
   Dot,
   Empty,
   ErrorBanner,
   MINE_BUCKET_LABEL,
   QUEUE_BUCKET_TAG,
   RefreshIcon,
-  ReviewLabel,
 } from "../ui/atoms";
 
 type Tab = "mine" | "review";
@@ -168,6 +167,11 @@ function MineTab({ snap, relative }: { snap: Snapshot; relative: boolean }) {
 }
 
 function MineRow({ pr, relative }: { pr: MinePr; relative: boolean }) {
+  // The group header above already says "blocked" or "waiting on review", so
+  // repeating the review state on every row is noise. Only the exceptions earn
+  // space: broken CI, and merge conflicts.
+  const ci = ciShort(pr.ci);
+
   return (
     <button className="pop-row" onClick={() => open(pr.url)} title={pr.title}>
       <div className="top">
@@ -175,10 +179,15 @@ function MineRow({ pr, relative }: { pr: MinePr; relative: boolean }) {
           <div className="title">{pr.title}</div>
           <div className="facts">
             <span className="slug">{pr.slug}</span>
-            <span className="sep" />
-            <CiBadge ci={pr.ci} />
-            <span className="sep" />
-            <ReviewLabel review={pr.review} text={pr.reviewText} />
+            {ci && (
+              <>
+                <span className="sep" />
+                <span className={`ci s-${pr.ci.state}`}>
+                  <Dot state={pr.ci.state} />
+                  {ci}
+                </span>
+              </>
+            )}
             {pr.conflicting && (
               <>
                 <span className="sep" />
@@ -217,38 +226,39 @@ function ReviewTab({
   return (
     <>
       <div className="queue-note">
-        {queue.length} need a human ·{" "}
-        <b>{snap.hidden.alreadyApproved + snap.hidden.alreadyReviewed} hidden</b> (already
-        approved or reviewed by you)
+        {queue.length} need you ·{" "}
+        <b>{snap.hidden.alreadyApproved + snap.hidden.alreadyReviewed} handled</b>
       </div>
-      {queue.map((pr) => (
-        <button
-          key={pr.id}
-          className="pop-row"
-          onClick={() => open(pr.url)}
-          title={pr.siblingNote ?? pr.title}
-        >
-          <div className="top">
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span className={`bucket-tag s-${pr.bucket}`}>
-                  {QUEUE_BUCKET_TAG[pr.bucket]}
-                </span>
-                {pr.ticket && <span className="ticket">{pr.ticket}</span>}
+      {queue.map((pr) => {
+        const ci = ciShort(pr.ci);
+        return (
+          <button
+            key={pr.id}
+            className="pop-row"
+            onClick={() => open(pr.url)}
+            // The bucket lost its own line; the tooltip still spells it out.
+            title={pr.siblingNote ?? `${QUEUE_BUCKET_TAG[pr.bucket]} · ${pr.title}`}
+          >
+            <div className="top">
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="title">{pr.title}</div>
+                <div className="facts">
+                  <Dot state={pr.bucket} />
+                  <span className="slug">{pr.slug}</span>
+                  <span className="author">{pr.author}</span>
+                  {ci && (
+                    <span className={`ci s-${pr.ci.state}`}>
+                      <Dot state={pr.ci.state} />
+                      {ci}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="title" style={{ marginTop: 3 }}>
-                {pr.title}
-              </div>
-              <div className="facts">
-                <span className="slug">{pr.slug}</span>
-                <span className="author">{pr.author}</span>
-                <CiBadge ci={pr.ci} />
-              </div>
+              <span className="age">{displayAge(pr.age, pr.createdAt, relative)}</span>
             </div>
-            <span className="age">{displayAge(pr.age, pr.createdAt, relative)}</span>
-          </div>
-        </button>
-      ))}
+          </button>
+        );
+      })}
     </>
   );
 }

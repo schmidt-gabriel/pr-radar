@@ -62,6 +62,21 @@ export function Dot({ state, lg }: { state: string; lg?: boolean }) {
   return <span className={`dot ${lg ? "lg" : ""} dot-${state}`} />;
 }
 
+/**
+ * The glance form of a CI state. Green is the normal case and says nothing
+ * worth reading, so it returns null and the row simply omits it.
+ */
+export function ciShort(ci: Ci): string | null {
+  switch (ci.state) {
+    case "fail":
+      return ci.failed > 1 ? `${ci.failed} checks failed` : "CI failed";
+    case "pending":
+      return "CI running";
+    default:
+      return null;
+  }
+}
+
 export function CiBadge({ ci, lg }: { ci: Ci; lg?: boolean }) {
   return (
     <span className={`ci ${lg ? "lg" : ""} s-${ci.state}`} title={ciTooltip(ci)}>

@@ -33,6 +33,10 @@ function windowLabel(): string {
 
 const isPopover = windowLabel() === "popover";
 
+// The popover window is transparent so its rounded corners actually show; the
+// page behind it has to be transparent too, or the corners get filled back in.
+document.documentElement.dataset.window = isPopover ? "popover" : "main";
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>{isPopover ? <Popover /> : <App />}</StrictMode>,
 );

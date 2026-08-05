@@ -36,12 +36,14 @@
         "skipTaskbar": true,
         "visible": false,
         "focus": false,
-        "backgroundColor": "#14171d"
+        "shadow": true,
+        "transparent": true
       }
     ],
     "security": {
       "csp": null
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,

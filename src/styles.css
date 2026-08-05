@@ -309,6 +309,14 @@ button {
    1a — Menu bar popover
    ========================================================================== */
 
+/* The popover window is transparent so its corners can actually be round. The
+   page behind it has to be transparent too, or the corners get filled back in
+   and the window reads as a hard rectangle. */
+:root[data-window="popover"],
+:root[data-window="popover"] body {
+  background: transparent;
+}
+
 .popover {
   display: flex;
   flex-direction: column;
@@ -373,12 +381,16 @@ button {
 }
 .pop-row:hover { background: var(--surface-raised); }
 .pop-row .top { display: flex; align-items: flex-start; gap: 8px; }
+/* One line, always. A wrapped title turns a scannable list into a wall, and
+   the full text is in the tooltip and on GitHub. */
 .pop-row .title {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-body);
   line-height: 1.35;
-  text-wrap: pretty;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .pop-row .facts {
   display: flex;
