@@ -1,3 +1,6 @@
+<img width="256" height="256" alt="icon" src="https://github.com/user-attachments/assets/8425b4a5-2eb2-4f7b-8b36-b108c606f03d" />
+
+
 # PR Radar
 
 A macOS menu-bar app for the status of your PRs, their CI, and your review queue.
