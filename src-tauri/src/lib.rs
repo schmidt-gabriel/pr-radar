@@ -87,6 +87,36 @@ fn open_main(app: AppHandle, view: Option<String>) {
     if let Some(pop) = app.get_webview_window("popover") {
         let _ = pop.hide();
     }
+    sync_dock_visibility(&app);
+}
+
+/// Show a Dock icon only while the triage window is open.
+///
+/// Closing that window leaves the app alive in the tray, and a tray-only app
+/// with a Dock icon and no window is just clutter. `Accessory` also keeps the
+/// popover from stealing focus the way a regular app would.
+///
+/// macOS only: Linux has no equivalent, and the window manager already hides
+/// the entry when the window goes away.
+fn sync_dock_visibility(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        let window_open = app
+            .get_webview_window("main")
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false);
+
+        let policy = if window_open {
+            tauri::ActivationPolicy::Regular
+        } else {
+            tauri::ActivationPolicy::Accessory
+        };
+        let _ = app.set_activation_policy(policy);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -387,27 +417,31 @@ pub fn run() {
             app.manage(state.clone());
 
             // --- tray ---------------------------------------------------------
-            // Linux appindicator delivers no click events, so the popover needs
-            // a menu entry or it is unreachable except by global shortcut.
             let status_item = MenuItem::with_id(app, "status", "Connecting…", false, None::<&str>)?;
-            let popover_item =
-                MenuItem::with_id(app, "popover", "Show popover", true, None::<&str>)?;
             let open_item = MenuItem::with_id(app, "open", "Open PR Radar", true, None::<&str>)?;
             let refresh_item =
                 MenuItem::with_id(app, "refresh", "Refresh now", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(
-                app,
-                &[
-                    &status_item,
-                    &PredefinedMenuItem::separator(app)?,
-                    &popover_item,
-                    &open_item,
-                    &refresh_item,
-                    &PredefinedMenuItem::separator(app)?,
-                    &quit_item,
-                ],
-            )?;
+            let sep_top = PredefinedMenuItem::separator(app)?;
+            let sep_bottom = PredefinedMenuItem::separator(app)?;
+
+            // Clicking the tray icon already opens the popover, so a menu entry
+            // for it is redundant. Linux is the exception: appindicator delivers
+            // no click events, so there the entry is the only way in.
+            #[cfg(target_os = "linux")]
+            let popover_item =
+                MenuItem::with_id(app, "popover", "Show popover", true, None::<&str>)?;
+
+            let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+                vec![&status_item, &sep_top];
+            #[cfg(target_os = "linux")]
+            items.push(&popover_item);
+            items.push(&open_item);
+            items.push(&refresh_item);
+            items.push(&sep_bottom);
+            items.push(&quit_item);
+
+            let menu = Menu::with_items(app, &items)?;
             *state.status_item.lock().unwrap() = Some(status_item.clone());
 
             // A template image is black shapes plus alpha, which macOS recolors
@@ -463,13 +497,17 @@ pub fn run() {
                 });
             }
 
-            // Closing the triage window leaves the tray app running.
+            // Closing the triage window leaves the tray app running, so the
+            // close button hides rather than quits, and the Dock icon goes with
+            // it.
             if let Some(main) = app.get_webview_window("main") {
                 let main_handle = main.clone();
+                let dock_handle = app.handle().clone();
                 main.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                         let _ = main_handle.hide();
+                        sync_dock_visibility(&dock_handle);
                     }
                 });
             }

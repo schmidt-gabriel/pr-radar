@@ -98,8 +98,14 @@ export default function Popover() {
       </div>
 
       <div className="popover-foot">
-        <button onClick={() => openMain("triage")}>
-          {chord("R")} refresh · {chord("1")}/{chord("2")} tabs
+        {/* Was the shortcut hint doing double duty as a button, which read as
+            static text. The way out of the popover deserves to look clickable. */}
+        <button
+          className="foot-action"
+          onClick={() => openMain("triage")}
+          title={`Refresh ${chord("R")} · tabs ${chord("1")}/${chord("2")}`}
+        >
+          Open PR Radar ↗
         </button>
         <span>{snap?.viewer ?? ""}</span>
       </div>

@@ -423,8 +423,19 @@ button {
   font-size: 10px;
   color: var(--text-fainter);
 }
-.popover-foot button { font-family: var(--mono); font-size: 10px; color: var(--text-fainter); }
-.popover-foot button:hover { color: var(--blue); }
+.popover-foot .foot-action {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--blue);
+  padding: 3px 7px;
+  margin: -3px -7px;
+  border-radius: var(--radius-sm);
+}
+.popover-foot .foot-action:hover {
+  color: var(--blue-bright);
+  background: var(--blue-icon);
+}
 
 /* ==========================================================================
    1b — Desktop triage window
