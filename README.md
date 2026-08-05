@@ -29,27 +29,58 @@ cannot disagree with each other.
 `Ctrl+Alt+P` differs from the macOS chord because desktop environments reserve
 the Super key heavily.
 
-## Running it
+## Install
 
-Requires the [GitHub CLI](https://cli.github.com) logged in (`gh auth login`).
-The app reads its token, or `GH_TOKEN`/`GITHUB_TOKEN` if either is set. Needs
-the `repo` and `read:org` scopes.
+Grab the latest build from [**Releases**](https://github.com/schmidt-gabriel/pr-radar/releases).
+Every release is built by CI for both platforms.
+
+**macOS** — take `PR Radar_<version>_universal.dmg`. It covers both Apple
+silicon and Intel. The app is unsigned, so Gatekeeper will refuse it on first
+launch. Either right-click the app and choose **Open**, or clear the quarantine
+flag:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/PR Radar.app"
+```
+
+**Linux** — take whichever suits your distro:
+
+```bash
+sudo dpkg -i pr-radar_*_amd64.deb      # Debian, Ubuntu
+sudo rpm -i pr-radar-*.x86_64.rpm      # Fedora, RHEL
+chmod +x pr-radar_*.AppImage && ./pr-radar_*.AppImage   # anything else
+```
+
+The `.deb` and `.rpm` pull in their own runtime dependencies. For the AppImage
+you need `libwebkit2gtk-4.1-0` and `libayatana-appindicator3-1` present, plus a
+notification daemon, which every mainstream desktop already runs.
+
+### One-time setup
+
+The app needs the [GitHub CLI](https://cli.github.com) logged in:
+
+```bash
+gh auth login
+```
+
+It reads `gh`'s token, or `GH_TOKEN`/`GITHUB_TOKEN` if either is set. The token
+needs the `repo` and `read:org` scopes. If you launch from Finder or a desktop
+launcher and it cannot find `gh`, see the note at the bottom about minimal
+`PATH`.
+
+## Building from source
 
 ```bash
 npm install
-npm run app
+npm run app        # run it
+npm run app:build  # bundle it
 ```
 
-To build a distributable bundle:
+Bundles land in `src-tauri/target/release/bundle/`: `.app` and `.dmg` on macOS,
+`.deb`, `.rpm` and AppImage on Linux. Tauri filters the target list to whatever
+the host can produce, so the same config works on both.
 
-```bash
-npm run app:build
-```
-
-That produces a `.app` and `.dmg` on macOS, and `.deb`, `.rpm` and AppImage on
-Linux, under `src-tauri/target/release/bundle/`.
-
-### Linux system dependencies
+### Linux build dependencies
 
 Tauri builds against the system WebKit, and the tray needs an AppIndicator
 implementation. On Debian or Ubuntu:
@@ -60,8 +91,7 @@ sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev
 
 Fedora uses `webkit2gtk4.1-devel`, `libappindicator-gtk3-devel` and
 `librsvg2-devel`; Arch uses `webkit2gtk-4.1`, `libappindicator-gtk3` and
-`librsvg`. Notifications need a running notification daemon, which every
-mainstream desktop ships.
+`librsvg`.
 
 TLS is `rustls`, not `native-tls`, so there is no OpenSSL development package
 to chase.
