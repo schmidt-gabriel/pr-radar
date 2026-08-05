@@ -34,7 +34,7 @@ the Super key heavily.
 Grab the latest build from [**Releases**](https://github.com/schmidt-gabriel/pr-radar/releases).
 Every release is built by CI for both platforms.
 
-**macOS** — take `PR Radar_<version>_universal.dmg`. It covers both Apple
+**macOS** — take `PR.Radar_<version>_universal.dmg`. It covers both Apple
 silicon and Intel. The app is unsigned, so Gatekeeper will refuse it on first
 launch. Either right-click the app and choose **Open**, or clear the quarantine
 flag:
@@ -46,9 +46,9 @@ xattr -dr com.apple.quarantine "/Applications/PR Radar.app"
 **Linux** — take whichever suits your distro:
 
 ```bash
-sudo dpkg -i pr-radar_*_amd64.deb      # Debian, Ubuntu
-sudo rpm -i pr-radar-*.x86_64.rpm      # Fedora, RHEL
-chmod +x pr-radar_*.AppImage && ./pr-radar_*.AppImage   # anything else
+sudo dpkg -i PR.Radar_*_amd64.deb                          # Debian, Ubuntu
+sudo rpm -i PR.Radar-*.x86_64.rpm                          # Fedora, RHEL
+chmod +x PR.Radar_*.AppImage && ./PR.Radar_*.AppImage      # anything else
 ```
 
 The `.deb` and `.rpm` pull in their own runtime dependencies. For the AppImage
