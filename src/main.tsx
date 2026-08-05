@@ -13,6 +13,10 @@ import "./styles.css";
 
 import App from "./App";
 import Popover from "./views/Popover";
+import { PLATFORM } from "./lib/platform";
+
+// Lets CSS key off the host, e.g. only macOS needs room for traffic lights.
+document.documentElement.dataset.platform = PLATFORM;
 
 /**
  * Both windows load the same bundle; the label decides which surface renders.

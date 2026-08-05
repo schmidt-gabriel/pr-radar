@@ -26,8 +26,12 @@ pub struct AppState {
     feed: Mutex<Feed>,
     config: Mutex<Config>,
     data_dir: PathBuf,
-    /// Pinged by ⌘R, the tray menu, or the frontend to short-circuit the sleep.
+    /// Pinged by the refresh shortcut, the tray menu, or the frontend to
+    /// short-circuit the sleep.
     refresh: tokio::sync::Notify,
+    /// Tray menu line carrying the counts. macOS shows them in the tray title
+    /// instead, which neither Linux nor Windows supports.
+    status_item: Mutex<Option<MenuItem<tauri::Wry>>>,
 }
 
 impl AppState {
@@ -89,11 +93,16 @@ fn open_main(app: AppHandle, view: Option<String>) {
 // Tray
 // ---------------------------------------------------------------------------
 
-/// Place the popover directly under the tray icon, the way a native menu-bar
-/// app does. Falls back to wherever the window already is if the trigger
-/// carried no rect (global shortcut, menu item).
+/// Anchor the popover to the tray icon, the way a native menu-bar app does.
+///
+/// The anchor flips when the icon sits in the lower half of the screen: a
+/// bottom panel (the Windows taskbar, and KDE or Ubuntu docks by default) would
+/// otherwise push the window straight off the bottom edge.
 fn position_under_tray(win: &tauri::WebviewWindow, rect: Option<tauri::Rect>) {
-    let Some(rect) = rect else { return };
+    let Some(rect) = rect else {
+        position_fallback(win);
+        return;
+    };
     let scale = win.scale_factor().unwrap_or(1.0);
 
     let (icon_x, icon_y) = match rect.position {
@@ -105,14 +114,59 @@ fn position_under_tray(win: &tauri::WebviewWindow, rect: Option<tauri::Rect>) {
         tauri::Size::Logical(s) => (s.width * scale, s.height * scale),
     };
 
+    let (win_w, win_h) = win
+        .outer_size()
+        .map(|s| (s.width as f64, s.height as f64))
+        .unwrap_or((400.0 * scale, 620.0 * scale));
+
+    let gap = 4.0 * scale;
+    let mut x = icon_x + icon_w / 2.0 - win_w / 2.0;
+
+    // Screen the icon is on, so the flip test uses the right midpoint.
+    let (screen_x, screen_y, screen_w, screen_h) = screen_bounds(win, scale);
+    let below_midpoint = icon_y > screen_y + screen_h / 2.0;
+    let y = if below_midpoint {
+        icon_y - win_h - gap
+    } else {
+        icon_y + icon_h + gap
+    };
+
+    // Keep it on screen when the icon is near a corner.
+    let max_x = screen_x + screen_w - win_w - 8.0;
+    x = x.clamp(screen_x + 8.0, max_x.max(screen_x + 8.0));
+
+    let _ = win.set_position(PhysicalPosition::new(x, y.max(screen_y)));
+}
+
+/// Where to put the popover when the trigger carried no icon rect: the global
+/// shortcut on any platform, and every trigger under Linux appindicator, which
+/// reports no geometry at all.
+fn position_fallback(win: &tauri::WebviewWindow) {
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let (screen_x, screen_y, screen_w, _) = screen_bounds(win, scale);
     let win_w = win
         .outer_size()
         .map(|s| s.width as f64)
         .unwrap_or(400.0 * scale);
-    let x = icon_x + icon_w / 2.0 - win_w / 2.0;
-    let y = icon_y + icon_h + 4.0 * scale;
 
-    let _ = win.set_position(PhysicalPosition::new(x.max(8.0), y));
+    let margin = 12.0 * scale;
+    let x = screen_x + screen_w - win_w - margin;
+    // Clear a typical top panel rather than tucking under it.
+    let y = screen_y + 32.0 * scale;
+
+    let _ = win.set_position(PhysicalPosition::new(x.max(screen_x + margin), y));
+}
+
+fn screen_bounds(win: &tauri::WebviewWindow, scale: f64) -> (f64, f64, f64, f64) {
+    match win.current_monitor() {
+        Ok(Some(m)) => {
+            let p = m.position();
+            let s = m.size();
+            (p.x as f64, p.y as f64, s.width as f64, s.height as f64)
+        }
+        // Assume a modest single screen rather than refusing to place at all.
+        _ => (0.0, 0.0, 1440.0 * scale, 900.0 * scale),
+    }
 }
 
 fn toggle_popover(app: &AppHandle, rect: Option<tauri::Rect>) {
@@ -128,13 +182,10 @@ fn toggle_popover(app: &AppHandle, rect: Option<tauri::Rect>) {
     }
 }
 
-/// macOS renders the tray title next to the icon — a compact "how many things
-/// are on fire" badge that is readable without opening anything.
-fn update_tray_title(app: &AppHandle, feed: &Feed) {
-    let Some(tray) = app.tray_by_id("main") else {
-        return;
-    };
-    let title = match feed {
+/// Compact badge for the macOS tray title: "how many things are on fire",
+/// readable without opening anything.
+fn badge_text(feed: &Feed) -> Option<String> {
+    match feed {
         Feed::Ready(snap) => {
             let blocked = snap.mine_counts.blocked;
             let queue = snap.queue.len();
@@ -148,8 +199,61 @@ fn update_tray_title(app: &AppHandle, feed: &Feed) {
         }
         Feed::Error(_) => Some("!".to_string()),
         Feed::Loading => None,
-    };
-    let _ = tray.set_title(title.as_deref());
+    }
+}
+
+/// The same information spelled out, for surfaces that fit a sentence.
+fn status_text(feed: &Feed) -> String {
+    match feed {
+        Feed::Ready(snap) => {
+            let blocked = snap.mine_counts.blocked;
+            let ready = snap.mine_counts.ready;
+            let queue = snap.queue.len();
+
+            let mut parts = Vec::new();
+            if blocked > 0 {
+                parts.push(format!("{blocked} blocked"));
+            }
+            if ready > 0 {
+                parts.push(format!("{ready} ready to merge"));
+            }
+            if queue > 0 {
+                parts.push(format!("{queue} to review"));
+            }
+            if parts.is_empty() {
+                "Nothing waiting".to_string()
+            } else {
+                parts.join(" · ")
+            }
+        }
+        Feed::Error(_) => "Cannot reach GitHub".to_string(),
+        Feed::Loading => "Connecting…".to_string(),
+    }
+}
+
+/// Surface the counts through whichever channels the host actually supports.
+///
+/// The three disagree, so all three get used:
+/// - `set_title` works on macOS and Linux, but not Windows. On Linux a panel
+///   may still truncate or hide it.
+/// - `set_tooltip` works on macOS and Windows, but not Linux.
+/// - The menu line works everywhere, and is the only channel guaranteed to be
+///   readable under Linux appindicator.
+fn update_tray_status(app: &AppHandle, state: &Arc<AppState>, feed: &Feed) {
+    let status = status_text(feed);
+
+    if let Some(tray) = app.tray_by_id("main") {
+        if !cfg!(target_os = "windows") {
+            let _ = tray.set_title(badge_text(feed).as_deref());
+        }
+        if !cfg!(target_os = "linux") {
+            let _ = tray.set_tooltip(Some(&format!("PR Radar · {status}")));
+        }
+    }
+
+    if let Some(item) = state.status_item.lock().unwrap().as_ref() {
+        let _ = item.set_text(&status);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -158,7 +262,7 @@ fn update_tray_title(app: &AppHandle, feed: &Feed) {
 
 fn publish(app: &AppHandle, state: &Arc<AppState>, feed: Feed) {
     state.set_feed(feed.clone());
-    update_tray_title(app, &feed);
+    update_tray_status(app, state, &feed);
     let _ = app.emit(FEED_EVENT, &feed);
 }
 
@@ -278,10 +382,17 @@ pub fn run() {
                 config: Mutex::new(config),
                 data_dir,
                 refresh: tokio::sync::Notify::new(),
+                status_item: Mutex::new(None),
             });
             app.manage(state.clone());
 
             // --- tray ---------------------------------------------------------
+            // Linux appindicator delivers no click events, so the popover needs
+            // a menu entry or it is unreachable except by global shortcut.
+            let status_item =
+                MenuItem::with_id(app, "status", "Connecting…", false, None::<&str>)?;
+            let popover_item =
+                MenuItem::with_id(app, "popover", "Show popover", true, None::<&str>)?;
             let open_item = MenuItem::with_id(app, "open", "Open PR Radar", true, None::<&str>)?;
             let refresh_item =
                 MenuItem::with_id(app, "refresh", "Refresh now", true, None::<&str>)?;
@@ -289,25 +400,40 @@ pub fn run() {
             let menu = Menu::with_items(
                 app,
                 &[
+                    &status_item,
+                    &PredefinedMenuItem::separator(app)?,
+                    &popover_item,
                     &open_item,
                     &refresh_item,
                     &PredefinedMenuItem::separator(app)?,
                     &quit_item,
                 ],
             )?;
+            *state.status_item.lock().unwrap() = Some(status_item.clone());
+
+            // A template image is black shapes plus alpha, which macOS recolors
+            // per menu-bar appearance. Elsewhere that is not a concept: the same
+            // file renders as a black silhouette, invisible on a dark panel.
+            // Only the path differs, so the builder chain below stays common and
+            // therefore gets type-checked on every platform.
+            // Regenerate both with icons/make_tray_icon.py.
+            #[cfg(target_os = "macos")]
+            let tray_icon = tauri::include_image!("./icons/tray.png");
+            #[cfg(not(target_os = "macos"))]
+            let tray_icon = tauri::include_image!("./icons/tray-color.png");
 
             let tray_state = state.clone();
-            TrayIconBuilder::with_id("main")
-                // A template image: black shapes plus alpha, which macOS
-                // recolors for light and dark menu bars. tray-icon scales any
-                // source to 18pt tall, so 36px is an exact 2x for Retina.
-                // Regenerate with icons/make_tray_icon.py.
-                .icon(tauri::include_image!("./icons/tray.png"))
-                .icon_as_template(true)
+            let tray = TrayIconBuilder::with_id("main")
+                .icon(tray_icon)
+                .icon_as_template(cfg!(target_os = "macos"))
                 .tooltip("PR Radar")
                 .menu(&menu)
-                .show_menu_on_left_click(false)
+                // macOS opens the popover on left click and the menu on right.
+                // Under appindicator there is no such distinction, so the menu
+                // has to be the primary interaction.
+                .show_menu_on_left_click(cfg!(target_os = "linux"))
                 .on_menu_event(move |app, event| match event.id.as_ref() {
+                    "popover" => toggle_popover(app, None),
                     "open" => open_main(app.clone(), None),
                     "refresh" => tray_state.refresh.notify_one(),
                     "quit" => app.exit(0),
@@ -323,8 +449,9 @@ pub fn run() {
                     {
                         toggle_popover(tray.app_handle(), Some(rect));
                     }
-                })
-                .build(app)?;
+                });
+
+            tray.build(app)?;
 
             // --- popover behaviour ---------------------------------------------
             if let Some(pop) = app.get_webview_window("popover") {
@@ -355,7 +482,15 @@ pub fn run() {
                     Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
                 };
 
-                let toggle = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyP);
+                // Cmd+Shift+P on macOS. Elsewhere SUPER is the Windows or Super
+                // key, which desktop environments reserve heavily, so use
+                // Ctrl+Alt+P instead.
+                #[cfg(target_os = "macos")]
+                let mods = Modifiers::SUPER | Modifiers::SHIFT;
+                #[cfg(not(target_os = "macos"))]
+                let mods = Modifiers::CONTROL | Modifiers::ALT;
+
+                let toggle = Shortcut::new(Some(mods), Code::KeyP);
                 handle.plugin(
                     tauri_plugin_global_shortcut::Builder::new()
                         .with_handler(move |app, _shortcut, event| {

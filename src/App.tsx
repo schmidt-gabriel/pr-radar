@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useFeed, usePrefs } from "./lib/feed";
 import { syncedAgo } from "./lib/format";
+import { chord, hasMod } from "./lib/platform";
 import Timeline from "./views/Timeline";
 import Triage from "./views/Triage";
 import { Empty, ErrorBanner, RefreshIcon } from "./ui/atoms";
@@ -34,7 +35,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey) return;
+      if (!hasMod(e)) return;
       if (e.key === "r") {
         e.preventDefault();
         doRefresh();
@@ -92,7 +93,7 @@ export default function App() {
         </button>
 
         <span className="synced">{snap ? syncedAgo(snap.fetchedAt, now) : "connecting…"}</span>
-        <button className="icon-btn" onClick={doRefresh} title="Refresh (⌘R)">
+        <button className="icon-btn" onClick={doRefresh} title={`Refresh (${chord("R")})`}>
           <RefreshIcon spinning={spinning || feed.status === "loading"} />
         </button>
       </header>

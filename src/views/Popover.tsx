@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { hidePopover, open, openMain, useFeed, usePrefs } from "../lib/feed";
 import { displayAge, syncedAgo } from "../lib/format";
+import { chord, hasMod } from "../lib/platform";
 import type { MineBucket, MinePr, QueuePr, Snapshot } from "../lib/types";
 import {
   CiBadge,
@@ -35,13 +36,14 @@ export default function Popover() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey && e.key === "r") {
+      const mod = hasMod(e);
+      if (mod && e.key === "r") {
         e.preventDefault();
         doRefresh();
-      } else if (e.metaKey && e.key === "1") {
+      } else if (mod && e.key === "1") {
         e.preventDefault();
         setTab("mine");
-      } else if (e.metaKey && e.key === "2") {
+      } else if (mod && e.key === "2") {
         e.preventDefault();
         setTab("review");
       } else if (e.key === "Escape") {
@@ -76,7 +78,7 @@ export default function Popover() {
           <span className="synced">
             {snap ? syncedAgo(snap.fetchedAt, now) : "connecting…"}
           </span>
-          <button className="icon-btn" onClick={doRefresh} title="Refresh (⌘R)">
+          <button className="icon-btn" onClick={doRefresh} title={`Refresh (${chord("R")})`}>
             <RefreshIcon spinning={spinning || feed.status === "loading"} />
           </button>
         </div>
@@ -96,7 +98,9 @@ export default function Popover() {
       </div>
 
       <div className="popover-foot">
-        <button onClick={() => openMain("triage")}>⌘R refresh · ⌘1/⌘2 tabs</button>
+        <button onClick={() => openMain("triage")}>
+          {chord("R")} refresh · {chord("1")}/{chord("2")} tabs
+        </button>
         <span>{snap?.viewer ?? ""}</span>
       </div>
     </div>

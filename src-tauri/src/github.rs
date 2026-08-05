@@ -222,7 +222,11 @@ fn gh_candidates() -> Vec<PathBuf> {
             "/opt/homebrew/bin/gh", // Homebrew, Apple silicon
             "/usr/local/bin/gh",    // Homebrew, Intel + official installer
             "/opt/local/bin/gh",    // MacPorts
-            "/usr/bin/gh",
+            "/usr/bin/gh",          // distro packages
+            "/snap/bin/gh",         // Snap
+            "/var/lib/snapd/snap/bin/gh",
+            "/run/current-system/sw/bin/gh", // NixOS
+            "/usr/local/share/gh/bin/gh",
         ]
         .iter()
         .map(PathBuf::from),
@@ -232,6 +236,7 @@ fn gh_candidates() -> Vec<PathBuf> {
         let home = PathBuf::from(home);
         out.push(home.join(".local/bin/gh"));
         out.push(home.join("bin/gh"));
+        out.push(home.join(".nix-profile/bin/gh"));
     }
 
     out
@@ -259,7 +264,7 @@ async fn run_gh_auth_token(program: &Path) -> Result<String> {
 /// Last resort: ask the user's login shell, which sources their profile and so
 /// knows the PATH they actually use.
 async fn gh_token_via_login_shell() -> Result<String> {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
     let out = tokio::process::Command::new(&shell)
         .args(["-lc", "gh auth token"])
         .output()
@@ -307,9 +312,10 @@ async fn gh_auth_token() -> Result<String> {
     }
 
     Err(anyhow!(
-        "could not find the `gh` executable. Launched from Finder, an app only \
-         sees /usr/bin:/bin:/usr/sbin:/sbin, so a Homebrew `gh` is not on PATH. \
-         Install the GitHub CLI, or set GH_TOKEN for this app."
+        "could not find the `gh` executable. An app launched from the desktop \
+         inherits a minimal PATH rather than your shell's, so an install in \
+         /opt/homebrew, /snap or ~/.local can be invisible to it. Install the \
+         GitHub CLI, or set GH_TOKEN for this app."
     ))
 }
 

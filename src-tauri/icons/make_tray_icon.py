@@ -60,8 +60,8 @@ def coverage(x: float, y: float) -> float:
     return a
 
 
-def render(size: int) -> bytes:
-    """RGBA pixel rows, black with supersampled coverage.
+def render(size: int, rgb=(0, 0, 0)) -> bytes:
+    """RGBA pixel rows with supersampled coverage in the alpha channel.
 
     Tauri's `include_image!` only accepts RGBA, so this writes four channels
     rather than the more compact grayscale+alpha.
@@ -78,13 +78,13 @@ def render(size: int) -> bytes:
                     v = (py * SS + sy + 0.5) * step
                     total += coverage(u, v)
             alpha = int(round(255 * total / (SS * SS)))
-            row += bytes((0, 0, 0, alpha))  # black, alpha = coverage
+            row += bytes((rgb[0], rgb[1], rgb[2], alpha))
         rows.append(bytes(row))
     return rows
 
 
-def write_png(path: str, size: int) -> None:
-    rows = render(size)
+def write_png(path: str, size: int, rgb=(0, 0, 0)) -> None:
+    rows = render(size, rgb)
     raw = b"".join(b"\x00" + r for r in rows)  # filter type 0 per scanline
 
     def chunk(tag: bytes, data: bytes) -> bytes:
@@ -110,7 +110,15 @@ if __name__ == "__main__":
     import sys
 
     out = sys.argv[1] if len(sys.argv) > 1 else "."
+
+    # macOS template image: pure black, recolored by the system per appearance.
     # tray-icon scales any source to an 18pt height, so 36px is an exact 2x
     # match for Retina and downsamples cleanly 2:1 on a non-Retina display.
     write_png(f"{out}/tray.png", 36)
     write_png(f"{out}/tray@2x.png", 72)
+
+    # Linux and Windows have no template-image concept, so the same black art
+    # disappears against a dark panel. A near-white icon reads on the dark
+    # panels that ship as the default nearly everywhere, and still has enough
+    # contrast on light ones. 48px suits the larger tray sizes Linux uses.
+    write_png(f"{out}/tray-color.png", 48, rgb=(0xE8, 0xED, 0xF5))

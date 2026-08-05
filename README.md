@@ -5,37 +5,92 @@
 
 # PR Radar
 
-A macOS menu-bar app for the status of your PRs, their CI, and your review queue.
-Read-only: every row opens GitHub.
+A tray app for the status of your PRs, their CI, and your review queue.
+Read-only: every row opens GitHub. Runs on macOS and Linux.
 
 Implemented from the `PR Radar.dc.html` design doc, which explored three
 directions and recommended Tauri + React. All three ship here:
 
 | | Surface | Where |
 |---|---|---|
-| **1a** | Menu-bar popover — the 10×/day glance | tray icon, or ⌘⇧P |
-| **1b** | Desktop triage window — list + detail | main window, ⌘1 |
-| **1c** | Timeline — "when did each thing happen" | main window, ⌘2 |
+| **1a** | Tray popover — the 10×/day glance | tray icon, or the global shortcut |
+| **1b** | Desktop triage window — list + detail | main window, `⌘1` / `Ctrl+1` |
+| **1c** | Timeline — "when did each thing happen" | main window, `⌘2` / `Ctrl+2` |
 
 All three read the same derived snapshot from one Rust polling module, so they
 cannot disagree with each other.
 
+| Shortcut | macOS | Linux |
+|---|---|---|
+| Show/hide the popover (global) | `⌘⇧P` | `Ctrl+Alt+P` |
+| Refresh | `⌘R` | `Ctrl+R` |
+| Triage / Timeline | `⌘1` / `⌘2` | `Ctrl+1` / `Ctrl+2` |
+
+`Ctrl+Alt+P` differs from the macOS chord because desktop environments reserve
+the Super key heavily.
+
 ## Running it
 
-Requires the [GitHub CLI](https://cli.github.com) logged in (`gh auth login`) —
-the app reads its token, or `GH_TOKEN`/`GITHUB_TOKEN` if set. Needs the `repo`
-and `read:org` scopes.
+Requires the [GitHub CLI](https://cli.github.com) logged in (`gh auth login`).
+The app reads its token, or `GH_TOKEN`/`GITHUB_TOKEN` if either is set. Needs
+the `repo` and `read:org` scopes.
 
 ```bash
 npm install
 npm run app
 ```
 
-To build a distributable `.app`:
+To build a distributable bundle:
 
 ```bash
 npm run app:build
 ```
+
+That produces a `.app` and `.dmg` on macOS, and `.deb`, `.rpm` and AppImage on
+Linux, under `src-tauri/target/release/bundle/`.
+
+### Linux system dependencies
+
+Tauri builds against the system WebKit, and the tray needs an AppIndicator
+implementation. On Debian or Ubuntu:
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+Fedora uses `webkit2gtk4.1-devel`, `libappindicator-gtk3-devel` and
+`librsvg2-devel`; Arch uses `webkit2gtk-4.1`, `libappindicator-gtk3` and
+`librsvg`. Notifications need a running notification daemon, which every
+mainstream desktop ships.
+
+TLS is `rustls`, not `native-tls`, so there is no OpenSSL development package
+to chase.
+
+## Platform support
+
+The polling, derivation, storage and UI are shared. What differs is the tray,
+because the three platforms genuinely disagree about what a tray can do.
+
+| | macOS | Linux |
+|---|---|---|
+| Count beside the tray icon | yes | usually, panel-dependent |
+| Tray tooltip | yes | not supported |
+| Status line in the tray menu | yes | yes |
+| Left-click opens the popover | yes | no, use the menu |
+| Popover anchored to the icon | yes | no icon geometry, so it anchors top-right |
+
+Under AppIndicator the tray reports neither click events nor icon geometry, so
+on Linux the menu is the primary interaction and carries a **Show popover**
+entry. The status line in that menu exists because it is the one channel every
+platform renders reliably.
+
+The tray icon also differs by necessity. macOS gets a template image, meaning
+black shapes plus alpha that the system recolors per appearance. Linux has no
+such concept, so the same file would be a black silhouette on a dark panel; it
+gets a light-colored icon instead.
+
+Windows is not done. The blockers are `gh` discovery, which looks for `gh`
+rather than `gh.exe`, and installer targets.
 
 ## What it shows
 
@@ -73,13 +128,17 @@ collapse into one row with a `×N`.
 
 Fired for CI failures, approvals and change requests on your PRs, and for review
 requests aimed at you or one of your teams. Event ids are persisted to
-`~/Library/Application Support/dev.schmidt.pr-radar/seen-events.json`, so
-relaunching does not re-announce yesterday's failure. The first ever launch
-seeds silently instead of firing a notification per open PR.
+`seen-events.json` in the data directory below, so relaunching does not
+re-announce yesterday's failure. The first ever launch seeds silently instead of
+firing a notification per open PR.
 
 ## Configuration
 
-`~/Library/Application Support/dev.schmidt.pr-radar/config.json`:
+The data directory is `~/Library/Application Support/dev.schmidt.pr-radar/` on
+macOS and `~/.local/share/dev.schmidt.pr-radar/` on Linux (or
+`$XDG_DATA_HOME/dev.schmidt.pr-radar/` when that is set).
+
+`config.json` there:
 
 ```json
 { "org": "edsights", "label": "Team Review - READY", "pollSeconds": 60, "notify": true }
@@ -128,11 +187,16 @@ python3 make_tray_icon.py .   # menu-bar template image
 python3 make_app_icon.py .    # app icon: PNG sizes, .icns, .ico
 ```
 
-`make_tray_icon.py` writes a black-on-alpha template PNG at 36px, an exact 2x of
-the 18pt height `tray-icon` scales everything to. `make_app_icon.py` renders the
-Big Sur squircle and hands the set to `iconutil`; sizes at or below 64px get
-deliberately simplified geometry (fewer rings, heavier strokes, one contact)
-because the detailed artwork turns to mush when downscaled that far.
+`make_tray_icon.py` writes two files: `tray.png`, a black-on-alpha template at
+36px, an exact 2x of the 18pt height `tray-icon` scales everything to on macOS;
+and `tray-color.png` at 48px in near-white, for Linux panels where a template
+image would be an invisible black silhouette.
+
+`make_app_icon.py` renders the squircle and hands the set to `iconutil`; sizes
+at or below 64px get deliberately simplified geometry (fewer rings, heavier
+strokes, one contact) because the detailed artwork turns to mush when downscaled
+that far. It needs macOS for the `.icns` step; the PNGs and `.ico` it writes are
+portable.
 
 `dev/iconprev.html`, served by `npm run dev`, shows both at every size against a
 checkerboard.
@@ -153,3 +217,11 @@ the fastest way to check the derivation rules against live GitHub.
   a running check as passed.
 - A trailing `COMMENTED` review must not erase a standing approval, and a
   `DISMISSED` one must revoke it. Both are covered by tests in `derive.rs`.
+- Binding `metaKey` for shortcuts is the classic macOS-first bug: elsewhere Meta
+  is the Super key, so every shortcut silently does nothing. `lib/platform.ts`
+  picks the modifier, and the UI renders the chord the host writes it.
+- Tauri's Linux webview reports `AppleWebKit` in its user agent, so platform
+  detection has to match on `Macintosh`, not on `AppleWebKit`.
+- `gh` is resolved by absolute path as well as `PATH`. An app launched from
+  Finder or a desktop launcher inherits a minimal `PATH`, so an install under
+  `/opt/homebrew`, `/snap` or `~/.local` is invisible to it.

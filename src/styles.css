@@ -444,9 +444,13 @@ button {
   border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
-  padding: 0 14px 0 78px; /* clear the traffic lights */
+  padding: 0 14px;
   gap: 12px;
 }
+
+/* Only macOS overlays its window buttons on our content; elsewhere the native
+   titlebar sits above and reserving the space just leaves a hole. */
+:root[data-platform="macos"] .titlebar { padding-left: 78px; }
 
 .titlebar .name { font-size: 12px; font-weight: 600; color: var(--text-dim); }
 .titlebar .grow { flex: 1; }
