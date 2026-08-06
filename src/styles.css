@@ -497,7 +497,10 @@ button {
 
 .titlebar {
   position: relative;
-  height: 38px;
+  /* 48px so the traffic lights sit centred at their 18px inset, the way a
+     standard Mac toolbar window carries them, rather than crammed against the
+     corner. Height, inset and padding-left move together. */
+  height: 48px;
   flex: none;
   background: #1a1e25;
   border-bottom: 1px solid var(--line);
@@ -510,7 +513,7 @@ button {
 /* Only macOS overlays its window buttons on our content; elsewhere the native
    titlebar sits above and reserving the space just leaves a hole. Matches the
    inset given to the traffic lights by trafficLightPosition. */
-:root[data-platform="macos"] .titlebar { padding-left: 88px; }
+:root[data-platform="macos"] .titlebar { padding-left: 92px; }
 
 /* Centred against the window, not against whatever happens to sit either side
    of it, so it stays put as the counts and chips change width. */
