@@ -497,10 +497,13 @@ button {
 
 .titlebar {
   position: relative;
-  /* Height, trafficLightPosition and padding-left move together: y is what
-     centres a 12px button in this bar, so (60 - 12) / 2 = 24. A standard Mac
-     toolbar window is 52px; this is deliberately roomier. */
-  height: 60px;
+  /* Height is tied to where the traffic lights actually land, which is not
+     where trafficLightPosition reads like it puts them. tao does NOT treat `y`
+     as a top inset: it resizes the title-bar container to buttonHeight + y and
+     the buttons keep their offset inside it, so the buttons end up centred near
+     y, not at it. With y: 24 their centres sit around 21px, so a 44px bar
+     centres our content on the same line. Change `y` and this must follow. */
+  height: 44px;
   flex: none;
   background: #1a1e25;
   border-bottom: 1px solid var(--line);
