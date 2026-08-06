@@ -110,3 +110,8 @@ export function hidePopover() {
 export function openMain(view?: "triage" | "timeline") {
   void invoke("open_main", { view: view ?? null });
 }
+
+/** Guarded: in a plain browser there is no app to quit. */
+export function quitApp() {
+  if (IN_TAURI) void invoke("quit");
+}

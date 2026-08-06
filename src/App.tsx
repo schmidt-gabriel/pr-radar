@@ -78,13 +78,6 @@ export default function App() {
         <span className="grow" data-tauri-drag-region />
 
         <button
-          className={`chip toggle ${prefs.relativeTime ? "on" : ""}`}
-          onClick={() => update({ relativeTime: !prefs.relativeTime })}
-          title="Show ages as relative durations or calendar dates"
-        >
-          {prefs.relativeTime ? "3d" : "Aug 3"}
-        </button>
-        <button
           className={`chip toggle ${prefs.hideApprovedInQueue ? "on" : ""}`}
           onClick={() => update({ hideApprovedInQueue: !prefs.hideApprovedInQueue })}
           title="Hide PRs that already have one approval"

@@ -2,8 +2,8 @@
 // merge, and what is waiting on me to review. Every row opens GitHub.
 
 import { useEffect, useMemo, useState } from "react";
-import { hidePopover, open, openMain, useFeed, usePrefs } from "../lib/feed";
-import { displayAge, syncedAgo } from "../lib/format";
+import { hidePopover, open, openMain, quitApp, useFeed, usePrefs } from "../lib/feed";
+import { syncedAgo } from "../lib/format";
 import { chord, hasMod } from "../lib/platform";
 import type { MineBucket, MinePr, QueuePr, Snapshot } from "../lib/types";
 import {
@@ -90,9 +90,9 @@ export default function Popover() {
             <span className="breathing">Talking to GitHub…</span>
           </Empty>
         )}
-        {snap && tab === "mine" && <MineTab snap={snap} relative={prefs.relativeTime} />}
+        {snap && tab === "mine" && <MineTab snap={snap} />}
         {snap && tab === "review" && (
-          <ReviewTab snap={snap} queue={queue} relative={prefs.relativeTime} />
+          <ReviewTab snap={snap} queue={queue} />
         )}
       </div>
 
@@ -106,7 +106,12 @@ export default function Popover() {
         >
           Open PR Radar ↗
         </button>
-        <span>{snap?.viewer ?? ""}</span>
+        <div className="foot-right">
+          <span>{snap?.viewer ?? ""}</span>
+          <button className="foot-quit" onClick={quitApp} title="Quit PR Radar">
+            Quit
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -117,7 +122,7 @@ function visibleQueue(snap: Snapshot | null, hideApproved: boolean): QueuePr[] {
   return hideApproved ? snap.queue.filter((p) => p.bucket !== "partial") : snap.queue;
 }
 
-function MineTab({ snap, relative }: { snap: Snapshot; relative: boolean }) {
+function MineTab({ snap }: { snap: Snapshot }) {
   const groups = GROUP_ORDER.map((bucket) => ({
     bucket,
     items: snap.mine.filter((p) => p.bucket === bucket),
@@ -135,16 +140,18 @@ function MineTab({ snap, relative }: { snap: Snapshot; relative: boolean }) {
 
   return (
     <>
+      {/* Labels are clipped to one word each so three fit across 400px inline.
+          The full phrasing lives in the tooltip. */}
       <div className="stat-row">
-        <div className="stat-tile blocked">
+        <div className="stat-tile blocked" title="Blocked on you">
           <div className="n">{snap.mineCounts.blocked}</div>
-          <div className="k">blocked on you</div>
+          <div className="k">blocked</div>
         </div>
-        <div className="stat-tile ready">
+        <div className="stat-tile ready" title="Ready to merge">
           <div className="n">{snap.mineCounts.ready}</div>
-          <div className="k">ready to merge</div>
+          <div className="k">ready</div>
         </div>
-        <div className="stat-tile">
+        <div className="stat-tile" title="Waiting on review">
           <div className="n">{snap.mineCounts.waiting}</div>
           <div className="k">waiting</div>
         </div>
@@ -158,7 +165,7 @@ function MineTab({ snap, relative }: { snap: Snapshot; relative: boolean }) {
             <span className="n">{g.items.length}</span>
           </div>
           {g.items.map((pr) => (
-            <MineRow key={pr.id} pr={pr} relative={relative} />
+            <MineRow key={pr.id} pr={pr} />
           ))}
         </div>
       ))}
@@ -166,7 +173,7 @@ function MineTab({ snap, relative }: { snap: Snapshot; relative: boolean }) {
   );
 }
 
-function MineRow({ pr, relative }: { pr: MinePr; relative: boolean }) {
+function MineRow({ pr }: { pr: MinePr }) {
   // The group header above already says "blocked" or "waiting on review", so
   // repeating the review state on every row is noise. Only the exceptions earn
   // space: broken CI, and merge conflicts.
@@ -198,21 +205,13 @@ function MineRow({ pr, relative }: { pr: MinePr; relative: boolean }) {
             )}
           </div>
         </div>
-        <span className="age">{displayAge(pr.age, pr.createdAt, relative)}</span>
+        <span className="age">{pr.age}</span>
       </div>
     </button>
   );
 }
 
-function ReviewTab({
-  snap,
-  queue,
-  relative,
-}: {
-  snap: Snapshot;
-  queue: QueuePr[];
-  relative: boolean;
-}) {
+function ReviewTab({ snap, queue }: { snap: Snapshot; queue: QueuePr[] }) {
   if (queue.length === 0) {
     return (
       <Empty glyph="✓">
@@ -254,7 +253,7 @@ function ReviewTab({
                   )}
                 </div>
               </div>
-              <span className="age">{displayAge(pr.age, pr.createdAt, relative)}</span>
+              <span className="age">{pr.age}</span>
             </div>
           </button>
         );

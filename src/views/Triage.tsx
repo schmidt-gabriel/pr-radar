@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { open } from "../lib/feed";
-import { approvedByLabel, displayAge } from "../lib/format";
+import { approvedByLabel } from "../lib/format";
 import type {
   Check,
   MineBucket,
@@ -30,9 +30,17 @@ type Selection =
 const MINE_RAIL: MineBucket[] = ["blocked", "ready", "waiting", "draft"];
 const QUEUE_RAIL: QueueBucket[] = ["requested", "no_approval", "partial"];
 
+/**
+ * `urgency` keeps the order the backend derived: blocked first for your PRs,
+ * asked-of-you first for the queue. `oldest` throws that away and sorts purely
+ * by age, for when you want to clear the things that have been sitting longest.
+ */
+type Sort = "urgency" | "oldest";
+
 export default function Triage({ snap, prefs }: { snap: Snapshot; prefs: Prefs }) {
   const [selection, setSelection] = useState<Selection>({ side: "mine", bucket: "all" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [sort, setSort] = useState<Sort>("urgency");
 
   const queue = useMemo(
     () => (prefs.hideApprovedInQueue ? snap.queue.filter((p) => p.bucket !== "partial") : snap.queue),
@@ -40,16 +48,27 @@ export default function Triage({ snap, prefs }: { snap: Snapshot; prefs: Prefs }
   );
 
   const rows: (MinePr | QueuePr)[] = useMemo(() => {
-    if (selection.side === "merged") return [];
-    if (selection.side === "mine") {
-      return selection.bucket === "all"
-        ? snap.mine
-        : snap.mine.filter((p) => p.bucket === selection.bucket);
+    let base: (MinePr | QueuePr)[];
+    if (selection.side === "merged") {
+      base = [];
+    } else if (selection.side === "mine") {
+      base =
+        selection.bucket === "all"
+          ? snap.mine
+          : snap.mine.filter((p) => p.bucket === selection.bucket);
+    } else {
+      base =
+        selection.bucket === "all"
+          ? queue
+          : queue.filter((p) => p.bucket === selection.bucket);
     }
-    return selection.bucket === "all"
-      ? queue
-      : queue.filter((p) => p.bucket === selection.bucket);
-  }, [selection, snap.mine, queue]);
+
+    // createdAt is ISO-8601 in UTC, so a string compare is a date compare.
+    if (sort === "oldest") {
+      return [...base].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    }
+    return base;
+  }, [selection, snap.mine, queue, sort]);
 
   // Keep a sensible selection as data churns underneath.
   useEffect(() => {
@@ -125,21 +144,25 @@ export default function Triage({ snap, prefs }: { snap: Snapshot; prefs: Prefs }
       </nav>
 
       <section className="center">
-        <Header snap={snap} selection={selection} shown={rows.length} />
+        <Header
+          snap={snap}
+          selection={selection}
+          shown={rows.length}
+          sort={sort}
+          onToggleSort={() => setSort((s) => (s === "urgency" ? "oldest" : "urgency"))}
+        />
         <div className="scroll" style={{ flex: 1, minHeight: 0 }}>
           {selection.side === "merged" ? (
             <MergedList snap={snap} />
           ) : selection.side === "queue" ? (
             <QueueList
               items={rows as QueuePr[]}
-              prefs={prefs}
               selectedId={selectedId}
               onSelect={setSelectedId}
             />
           ) : (
             <MineList
               items={rows as MinePr[]}
-              prefs={prefs}
               selectedId={selectedId}
               onSelect={setSelectedId}
             />
@@ -180,10 +203,14 @@ function Header({
   snap,
   selection,
   shown,
+  sort,
+  onToggleSort,
 }: {
   snap: Snapshot;
   selection: Selection;
   shown: number;
+  sort: Sort;
+  onToggleSort: () => void;
 }) {
   const title =
     selection.side === "merged"
@@ -208,7 +235,17 @@ function Header({
       <h2>{title}</h2>
       <span className="sub">{sub}</span>
       <div className="filters">
-        <span className="chip">Sort: {selection.side === "queue" ? "priority" : "urgency"}</span>
+        <button
+          className="chip toggle"
+          onClick={onToggleSort}
+          title={
+            sort === "urgency"
+              ? "Sorted by urgency. Click to sort oldest first."
+              : "Sorted oldest first. Click to sort by urgency."
+          }
+        >
+          Sort: {sort}
+        </button>
       </div>
     </div>
   );
@@ -216,12 +253,10 @@ function Header({
 
 function MineList({
   items,
-  prefs,
   selectedId,
   onSelect,
 }: {
   items: MinePr[];
-  prefs: Prefs;
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -255,7 +290,7 @@ function MineList({
             </div>
           </div>
           <div className="right">
-            <span className="age">{displayAge(pr.age, pr.createdAt, prefs.relativeTime)}</span>
+            <span className="age">{pr.age}</span>
             <span
               className="open"
               onClick={(e) => {
@@ -274,12 +309,10 @@ function MineList({
 
 function QueueList({
   items,
-  prefs,
   selectedId,
   onSelect,
 }: {
   items: QueuePr[];
-  prefs: Prefs;
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -317,7 +350,7 @@ function QueueList({
             </div>
             <div className="right">
               <span className="age">
-                {displayAge(pr.age, pr.createdAt, prefs.relativeTime)}
+                {pr.age}
               </span>
               <span
                 className="open"

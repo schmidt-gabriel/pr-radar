@@ -157,11 +157,9 @@ export interface Config {
 
 /** UI-only preferences. */
 export interface Prefs {
-  relativeTime: boolean;
   hideApprovedInQueue: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
-  relativeTime: true,
   hideApprovedInQueue: false,
 };

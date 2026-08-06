@@ -109,8 +109,11 @@ macOS, and `~/.local/share/dev.schmidt.pr-radar/` on Linux (or
 `seen-events.json` beside it tracks which events have already been announced.
 Delete it to make the next poll re-seed silently.
 
-The view toggles (relative versus absolute dates, hiding partially-approved PRs)
-live in the window titlebar and persist in the webview.
+Hiding partially-approved PRs is a titlebar toggle and persists in the webview.
+Sort order (urgency versus oldest first) is a chip in the list header and resets
+each session.
+
+Ages are always relative (`3d`, `4h`), computed once in Rust at fetch time.
 
 ## Icons
 

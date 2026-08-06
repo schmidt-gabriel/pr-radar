@@ -73,6 +73,14 @@ fn hide_popover(app: AppHandle) {
     }
 }
 
+/// Quit outright. Worth exposing to the popover: once the triage window is
+/// closed the app is an Accessory, which means no application menu and so no
+/// ⌘Q, leaving the tray menu as the only way out.
+#[tauri::command]
+fn quit(app: AppHandle) {
+    app.exit(0);
+}
+
 /// Bring the triage window forward, optionally on a specific view.
 #[tauri::command]
 fn open_main(app: AppHandle, view: Option<String>) {
@@ -394,6 +402,7 @@ pub fn run() {
             set_config,
             hide_popover,
             open_main,
+            quit,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

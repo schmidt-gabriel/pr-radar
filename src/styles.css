@@ -262,7 +262,13 @@ button {
   flex: 1;
   border: 1px solid var(--line-control);
   border-radius: var(--radius-md);
-  padding: 8px 10px;
+  /* Number and label sit on one line: the counts are a summary, not the
+     headline, and stacking them cost more vertical space than the rows below
+     them deserved to lose. */
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 5px 8px;
   background: var(--neutral-wash);
   text-align: left;
   min-width: 0;
@@ -272,14 +278,21 @@ button {
 .stat-tile:hover { filter: brightness(1.25); }
 .stat-tile .n {
   font-family: var(--mono);
-  font-size: 19px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1;
   color: var(--text-body);
+  flex: none;
 }
 .stat-tile.blocked .n { color: var(--red-bright); }
 .stat-tile.ready .n { color: var(--green-bright); }
-.stat-tile .k { font-size: 11px; margin-top: 3px; color: var(--text-faint); }
+.stat-tile .k {
+  font-size: 10px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .stat-tile.blocked .k { color: #b4756f; }
 .stat-tile.ready .k { color: #6d9a72; }
 
@@ -435,6 +448,28 @@ button {
   font-size: 10px;
   color: var(--text-fainter);
 }
+.popover-foot .foot-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Quiet by default. Once the triage window is closed the app has no menu bar
+   and so no ⌘Q, which makes this the only way out short of the tray. */
+.popover-foot .foot-quit {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-fainter);
+  padding: 3px 7px;
+  margin: -3px -7px -3px 0;
+  border-radius: var(--radius-sm);
+}
+.popover-foot .foot-quit:hover {
+  color: var(--red-bright);
+  background: var(--red-icon);
+}
+
 .popover-foot .foot-action {
   font-family: var(--mono);
   font-size: 10px;
@@ -461,6 +496,7 @@ button {
 }
 
 .titlebar {
+  position: relative;
   height: 38px;
   flex: none;
   background: #1a1e25;
@@ -472,10 +508,21 @@ button {
 }
 
 /* Only macOS overlays its window buttons on our content; elsewhere the native
-   titlebar sits above and reserving the space just leaves a hole. */
-:root[data-platform="macos"] .titlebar { padding-left: 78px; }
+   titlebar sits above and reserving the space just leaves a hole. Matches the
+   inset given to the traffic lights by trafficLightPosition. */
+:root[data-platform="macos"] .titlebar { padding-left: 88px; }
 
-.titlebar .name { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+/* Centred against the window, not against whatever happens to sit either side
+   of it, so it stays put as the counts and chips change width. */
+.titlebar .name {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  pointer-events: none; /* let the drag region underneath keep working */
+}
 .titlebar .grow { flex: 1; }
 
 .workspace { flex: 1; min-height: 0; display: flex; }

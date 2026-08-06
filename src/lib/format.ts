@@ -16,14 +16,6 @@ export function clockTime(iso: string): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-/**
- * Ages are computed once in Rust at fetch time. When the user prefers absolute
- * dates we swap in the calendar date instead of recomputing anything.
- */
-export function displayAge(age: string, iso: string, relative: boolean): string {
-  return relative ? age : shortDate(iso);
-}
-
 export function syncedAgo(fetchedAt: string, now: number): string {
   const secs = Math.max(0, Math.round((now - new Date(fetchedAt).getTime()) / 1000));
   if (secs < 60) return `synced ${secs}s ago`;
