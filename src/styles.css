@@ -497,10 +497,10 @@ button {
 
 .titlebar {
   position: relative;
-  /* 48px so the traffic lights sit centred at their 18px inset, the way a
-     standard Mac toolbar window carries them, rather than crammed against the
-     corner. Height, inset and padding-left move together. */
-  height: 48px;
+  /* Height, trafficLightPosition and padding-left move together: y is what
+     centres a 12px button in this bar, so (60 - 12) / 2 = 24. A standard Mac
+     toolbar window is 52px; this is deliberately roomier. */
+  height: 60px;
   flex: none;
   background: #1a1e25;
   border-bottom: 1px solid var(--line);
