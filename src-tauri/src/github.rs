@@ -352,6 +352,9 @@ query($q: String!, $limit: Int!) {
         reviews(first: 60) {
           nodes { state submittedAt author { login } }
         }
+        reviewThreads(first: 100) {
+          nodes { isResolved }
+        }
         commits(last: 1) {
           nodes {
             commit {
@@ -409,6 +412,8 @@ pub struct RawPr {
     pub review_requests: Option<NodeList<ReviewRequest>>,
     #[serde(default)]
     pub reviews: Option<NodeList<RawReview>>,
+    #[serde(default)]
+    pub review_threads: Option<NodeList<RawReviewThread>>,
     #[serde(default)]
     pub commits: Option<NodeList<CommitNode>>,
 }
@@ -470,6 +475,12 @@ impl RawPr {
             .as_ref()
             .map(|r| r.nodes.as_slice())
             .unwrap_or(&[])
+    }
+
+    pub fn has_unresolved_review_threads(&self) -> bool {
+        self.review_threads
+            .as_ref()
+            .is_some_and(|threads| threads.nodes.iter().any(|thread| !thread.is_resolved))
     }
 
     pub fn head_oid(&self) -> String {
@@ -535,6 +546,13 @@ pub struct RawReview {
     pub submitted_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub author: Option<Actor>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawReviewThread {
+    #[serde(default)]
+    pub is_resolved: bool,
 }
 
 impl RawReview {

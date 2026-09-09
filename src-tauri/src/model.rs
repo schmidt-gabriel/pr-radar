@@ -37,6 +37,9 @@ pub enum ReviewState {
     Approved,
     /// Has a human approval but the branch protection bar is not met yet.
     ApprovedNeedsMore,
+    /// Review approval is complete, but an unresolved review conversation still
+    /// prevents the PR from merging.
+    ApprovedNeedsConversation,
     ReviewRequired,
     None,
 }

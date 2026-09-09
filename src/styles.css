@@ -71,7 +71,7 @@
 .s-fail, .s-changes_requested, .s-blocked, .s-ci_fail { color: var(--red-bright); }
 .s-pending, .s-partial, .s-ci_running { color: var(--amber-bright); }
 .s-no_approval { color: var(--orange); }
-.s-approved_needs_more, .s-requested, .s-review_requested { color: var(--blue); }
+.s-approved_needs_more, .s-approved_needs_conversation, .s-requested, .s-review_requested { color: var(--blue); }
 .s-none, .s-review_required, .s-waiting, .s-skipped, .s-draft, .s-opened,
 .s-commented { color: var(--text-faint); }
 
@@ -79,7 +79,7 @@
 .dot-fail, .dot-changes_requested, .dot-blocked, .dot-ci_fail { background: var(--red-bright); }
 .dot-pending, .dot-partial, .dot-ci_running { background: var(--amber-bright); }
 .dot-no_approval { background: var(--orange); }
-.dot-approved_needs_more, .dot-requested, .dot-review_requested { background: var(--blue); }
+.dot-approved_needs_more, .dot-approved_needs_conversation, .dot-requested, .dot-review_requested { background: var(--blue); }
 .dot-none, .dot-review_required, .dot-waiting, .dot-skipped, .dot-draft,
 .dot-opened, .dot-commented { background: var(--text-faint); }
 
