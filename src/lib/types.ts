@@ -11,6 +11,7 @@ export type ReviewState =
   | "changes_requested"
   | "approved"
   | "approved_needs_more"
+  | "approved_needs_conversation"
   | "review_required"
   | "none";
 

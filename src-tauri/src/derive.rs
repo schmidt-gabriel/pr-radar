@@ -244,6 +244,50 @@ fn reviewed_by(reviews: &[RawReview], login: &str) -> bool {
     reviews.iter().any(|r| r.author_login() == login)
 }
 
+fn review_status(
+    decision: &str,
+    approvals: &[String],
+    blockers: &[String],
+    has_unresolved_conversations: bool,
+) -> (ReviewState, String) {
+    if !blockers.is_empty() || decision == "CHANGES_REQUESTED" {
+        let who = blockers.first().cloned();
+        return (
+            ReviewState::ChangesRequested,
+            match who {
+                Some(w) => format!("Changes requested · {w}"),
+                None => "Changes requested".to_string(),
+            },
+        );
+    }
+
+    // GitHub can leave reviewDecision as REVIEW_REQUIRED while an unresolved
+    // conversation blocks merging, despite a valid human approval. The
+    // conversation is the actionable blocker in that case, not another review.
+    if !approvals.is_empty() && has_unresolved_conversations {
+        return (
+            ReviewState::ApprovedNeedsConversation,
+            "Approved · resolve conversations".to_string(),
+        );
+    }
+
+    if decision == "APPROVED" {
+        (ReviewState::Approved, "Approved".to_string())
+    } else if !approvals.is_empty() {
+        // `reviewDecision` stays REVIEW_REQUIRED (or empty) until branch
+        // protection is satisfied, so an approval here is real but not yet
+        // enough.
+        (
+            ReviewState::ApprovedNeedsMore,
+            "Approved · needs 1 more".to_string(),
+        )
+    } else if decision == "REVIEW_REQUIRED" {
+        (ReviewState::ReviewRequired, "Review required".to_string())
+    } else {
+        (ReviewState::None, "No reviewers yet".to_string())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // My PRs
 // ---------------------------------------------------------------------------
@@ -259,31 +303,12 @@ pub fn derive_mine(prs: &[RawPr], now: DateTime<Utc>) -> Vec<MinePr> {
             let blockers = changes_requested_by(reviews);
             let decision = pr.review_decision.as_deref().unwrap_or("");
             let conflicting = pr.mergeable.as_deref() == Some("CONFLICTING");
-
-            let (review, review_text) = if !blockers.is_empty() || decision == "CHANGES_REQUESTED" {
-                let who = blockers.first().cloned();
-                (
-                    ReviewState::ChangesRequested,
-                    match who {
-                        Some(w) => format!("Changes requested · {w}"),
-                        None => "Changes requested".to_string(),
-                    },
-                )
-            } else if decision == "APPROVED" {
-                (ReviewState::Approved, "Approved".to_string())
-            } else if !approvals.is_empty() {
-                // `reviewDecision` stays REVIEW_REQUIRED (or empty) until branch
-                // protection is satisfied, so an approval here is real but not
-                // yet enough.
-                (
-                    ReviewState::ApprovedNeedsMore,
-                    "Approved · needs 1 more".to_string(),
-                )
-            } else if decision == "REVIEW_REQUIRED" {
-                (ReviewState::ReviewRequired, "Review required".to_string())
-            } else {
-                (ReviewState::None, "No reviewers yet".to_string())
-            };
+            let (review, review_text) = review_status(
+                decision,
+                &approvals,
+                &blockers,
+                pr.has_unresolved_review_threads(),
+            );
 
             let bucket = if pr.is_draft {
                 MineBucket::Draft
@@ -911,6 +936,14 @@ mod tests {
     fn bot_approval_never_satisfies_the_queue() {
         let reviews = vec![review("coderabbitai", "APPROVED", 5)];
         assert!(approvals_of(&reviews).is_empty());
+    }
+
+    #[test]
+    fn unresolved_conversations_do_not_request_an_extra_approval() {
+        let approvals = vec!["chucklangford".to_string()];
+        let (state, text) = review_status("REVIEW_REQUIRED", &approvals, &[], true);
+        assert_eq!(state, ReviewState::ApprovedNeedsConversation);
+        assert_eq!(text, "Approved · resolve conversations");
     }
 
     #[test]
