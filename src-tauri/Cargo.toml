@@ -1,6 +1,6 @@
 [package]
 name = "pr-radar"
-version = "0.1.0"
+version = "0.2.0"
 description = "Status of my PRs, CI, and my review queue"
 authors = ["Gabriel Schmidt"]
 license = ""
