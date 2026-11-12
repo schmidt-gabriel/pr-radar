@@ -86,10 +86,12 @@ export default function Triage({ snap, prefs }: { snap: Snapshot; prefs: Prefs }
       <nav className="rail">
         <div className="section">
           <div className="eyebrow">Mine</div>
+          {/* Lists every open PR, not just the ones needing attention. The
+              blocked and ready rails below are the attention subset. */}
           <RailItem
-            label="Needs attention"
+            label="All open"
             count={snap.mine.length}
-            state="blocked"
+            state="none"
             selected={selection.side === "mine" && selection.bucket === "all"}
             onClick={() => setSelection({ side: "mine", bucket: "all" })}
           />
@@ -163,6 +165,7 @@ export default function Triage({ snap, prefs }: { snap: Snapshot; prefs: Prefs }
           ) : (
             <MineList
               items={rows as MinePr[]}
+              grouped={selection.bucket === "all" && sort === "urgency"}
               selectedId={selectedId}
               onSelect={setSelectedId}
             />
@@ -217,7 +220,7 @@ function Header({
       ? "Recently merged"
       : selection.side === "mine"
         ? selection.bucket === "all"
-          ? "Needs attention"
+          ? "All open PRs"
           : MINE_BUCKET_LABEL[selection.bucket]
         : selection.bucket === "all"
           ? "Review queue"
@@ -251,7 +254,62 @@ function Header({
   );
 }
 
+/**
+ * `grouped` splits the full list into what needs attention and everything
+ * else. The backend already sorts attention first and marks each PR, so this
+ * only draws a heading where the flag flips; it decides nothing.
+ */
 function MineList({
+  items,
+  grouped,
+  selectedId,
+  onSelect,
+}: {
+  items: MinePr[];
+  grouped: boolean;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  if (items.length === 0) {
+    return grouped ? (
+      <Empty glyph="◎">No open PRs.</Empty>
+    ) : (
+      <Empty glyph="◎">Nothing here. Enjoy it.</Empty>
+    );
+  }
+  if (!grouped) {
+    return <MineRows items={items} selectedId={selectedId} onSelect={onSelect} />;
+  }
+
+  const attention = items.filter((p) => p.needsAttention);
+  const other = items.filter((p) => !p.needsAttention);
+  return (
+    <>
+      {attention.length > 0 && (
+        <>
+          <div className="group-head">
+            <Dot state="blocked" />
+            <span className="label">Needs attention</span>
+            <span className="n">{attention.length}</span>
+          </div>
+          <MineRows items={attention} selectedId={selectedId} onSelect={onSelect} />
+        </>
+      )}
+      {other.length > 0 && (
+        <>
+          <div className="group-head">
+            <Dot state="none" />
+            <span className="label">Other open PRs</span>
+            <span className="n">{other.length}</span>
+          </div>
+          <MineRows items={other} selectedId={selectedId} onSelect={onSelect} />
+        </>
+      )}
+    </>
+  );
+}
+
+function MineRows({
   items,
   selectedId,
   onSelect,
@@ -260,9 +318,6 @@ function MineList({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
-  if (items.length === 0) {
-    return <Empty glyph="◎">Nothing here. Enjoy it.</Empty>;
-  }
   return (
     <>
       {items.map((pr) => (

@@ -292,6 +292,15 @@ fn review_status(
 // My PRs
 // ---------------------------------------------------------------------------
 
+/// The buckets the user has to act on: fix it, or merge it. Waiting and draft
+/// PRs are still listed, just after these. Matches what the tray badge and
+/// status line count.
+pub fn needs_attention(bucket: MineBucket) -> bool {
+    matches!(bucket, MineBucket::Blocked | MineBucket::Ready)
+}
+
+/// Every open PR the `author:@me` search returned, attention first. Nothing is
+/// dropped here: the views list all of them.
 pub fn derive_mine(prs: &[RawPr], now: DateTime<Utc>) -> Vec<MinePr> {
     let mut out: Vec<MinePr> = prs
         .iter()
@@ -330,6 +339,7 @@ pub fn derive_mine(prs: &[RawPr], now: DateTime<Utc>) -> Vec<MinePr> {
                 created_at: pr.created_at,
                 age: age_of(pr.created_at, now),
                 bucket,
+                needs_attention: needs_attention(bucket),
                 ci,
                 review,
                 review_text,
@@ -992,6 +1002,60 @@ mod tests {
         // Two hours apart: separate visits, so separate rows.
         let out = collapse_timeline(vec![entry(180), entry(60)], now);
         assert_eq!(out.len(), 2);
+    }
+
+    fn raw_pr(number: u64, extra: serde_json::Value) -> RawPr {
+        let mut v = serde_json::json!({
+            "number": number,
+            "title": format!("PR {number}"),
+            "url": format!("https://github.com/o/r/pull/{number}"),
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-02T00:00:00Z",
+            "repository": { "nameWithOwner": "o/r" },
+        });
+        if let (Some(base), Some(more)) = (v.as_object_mut(), extra.as_object()) {
+            base.extend(more.clone());
+        }
+        serde_json::from_value(v).expect("valid RawPr fixture")
+    }
+
+    #[test]
+    fn every_open_pr_is_listed_with_attention_first() {
+        // Home lists all open PRs, not only the ones that need attention. A
+        // quiet PR waiting on review and a draft must still come through.
+        let prs = vec![
+            raw_pr(1, serde_json::json!({ "isDraft": true })),
+            raw_pr(
+                2,
+                serde_json::json!({ "reviewDecision": "REVIEW_REQUIRED" }),
+            ),
+            raw_pr(
+                3,
+                serde_json::json!({ "reviewDecision": "CHANGES_REQUESTED" }),
+            ),
+        ];
+        let mine = derive_mine(&prs, Utc::now());
+
+        let order: Vec<(u64, MineBucket, bool)> = mine
+            .iter()
+            .map(|p| (p.number, p.bucket, p.needs_attention))
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                (3, MineBucket::Blocked, true),
+                (2, MineBucket::Waiting, false),
+                (1, MineBucket::Draft, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn only_blocked_and_ready_need_attention() {
+        assert!(needs_attention(MineBucket::Blocked));
+        assert!(needs_attention(MineBucket::Ready));
+        assert!(!needs_attention(MineBucket::Waiting));
+        assert!(!needs_attention(MineBucket::Draft));
     }
 
     #[test]

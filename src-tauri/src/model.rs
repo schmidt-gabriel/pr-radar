@@ -105,6 +105,10 @@ pub struct MinePr {
     pub created_at: DateTime<Utc>,
     pub age: String,
     pub bucket: MineBucket,
+    /// Blocked or ready: the user has to act. Every open PR is listed, so the
+    /// views use this to split "act now" from the rest instead of each one
+    /// re-deciding which buckets matter.
+    pub needs_attention: bool,
     pub ci: Ci,
     pub review: ReviewState,
     pub review_text: String,
