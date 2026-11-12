@@ -3,7 +3,8 @@
 //! The two skills this app replaces (`my-prs`, `prs-to-review`) shell out to `gh`
 //! once per PR, which is fine for a one-off report but not for a 60s poller —
 //! 30 labeled PRs meant 30 subprocesses and 30 round trips. The same fields are
-//! available from a single GraphQL search, so each poll is 3 requests total.
+//! available from a GraphQL search, so each poll is a handful of requests: one
+//! per 25-PR page of each search.
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
@@ -14,6 +15,17 @@ use std::path::{Path, PathBuf};
 
 const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 const USER_AGENT: &str = "pr-radar/0.1";
+
+/// Search results per request. GitHub aborts a GraphQL query that runs past
+/// ~10s; 100 PRs with their nested reviews, threads and checks took 8-11s and
+/// intermittently came back as a 502. 25 per page keeps each request well
+/// under the limit.
+const SEARCH_PAGE_SIZE: u32 = 25;
+/// One initial attempt plus one retry for transient gateway errors.
+const MAX_ATTEMPTS: u32 = 2;
+const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+/// How much of an unexpected response body to quote in an error message.
+const BODY_SNIPPET_CHARS: usize = 200;
 
 pub struct Github {
     token: String,
@@ -42,41 +54,41 @@ impl Github {
         query: &str,
         vars: serde_json::Value,
     ) -> Result<T> {
-        let resp = self
-            .client
-            .post(GRAPHQL_URL)
-            .bearer_auth(&self.token)
-            .json(&json!({ "query": query, "variables": vars }))
-            .send()
-            .await
-            .context("GitHub GraphQL request failed")?;
+        let payload = json!({ "query": query, "variables": vars });
 
-        let status = resp.status();
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .context("GitHub returned a non-JSON response")?;
+        // GitHub's edge answers a slow query with an nginx HTML `502 Bad
+        // Gateway` rather than JSON. These are usually transient, so one retry
+        // after a short pause recovers most of them without hammering the API.
+        let mut attempt = 0;
+        let (status, body) = loop {
+            attempt += 1;
+            let resp = self
+                .client
+                .post(GRAPHQL_URL)
+                .bearer_auth(&self.token)
+                .json(&payload)
+                .send()
+                .await
+                .context("GitHub GraphQL request failed")?;
 
-        if !status.is_success() {
-            return Err(anyhow!("GitHub returned {}: {}", status, body));
-        }
+            let status = resp.status();
+            // Read as text, not `.json()`: decoding first turns an HTML error
+            // page into "expected value at line 1 column 1", hiding the status.
+            let body = resp
+                .text()
+                .await
+                .context("could not read GitHub's response body")?;
 
-        // GraphQL reports partial failures with HTTP 200 and an `errors` array.
-        if let Some(errors) = body.get("errors").and_then(|e| e.as_array()) {
-            if !errors.is_empty() {
-                let msgs: Vec<String> = errors
-                    .iter()
-                    .filter_map(|e| e.get("message").and_then(|m| m.as_str()))
-                    .map(|s| s.to_string())
-                    .collect();
-                return Err(anyhow!("GitHub GraphQL error: {}", msgs.join("; ")));
+            if attempt < MAX_ATTEMPTS && is_retryable(status) {
+                log::warn!("GitHub returned {status}; retrying once");
+                tokio::time::sleep(RETRY_DELAY).await;
+                continue;
             }
-        }
+            break (status, body);
+        };
 
-        let data = body
-            .get("data")
-            .ok_or_else(|| anyhow!("GitHub response had no data"))?;
-        Ok(serde_json::from_value(data.clone())?)
+        let data = parse_graphql_body(status, &body)?;
+        Ok(serde_json::from_value(data)?)
     }
 
     /// Who am I, and which teams of `org` am I on? Team review requests arrive as
@@ -148,25 +160,30 @@ impl Github {
     }
 
     /// Run a GitHub search and return every node that parses as a pull request.
+    ///
+    /// Fetched in pages of `SEARCH_PAGE_SIZE` until `limit` results have been
+    /// seen or the search runs out, so no single request risks GitHub's
+    /// GraphQL timeout.
     pub async fn search_prs(&self, q: &str, limit: u32) -> Result<Vec<RawPr>> {
         #[derive(Deserialize)]
         struct Resp {
-            search: SearchConn,
-        }
-        #[derive(Deserialize)]
-        struct SearchConn {
-            nodes: Vec<serde_json::Value>,
+            search: SearchPage,
         }
 
-        let resp: Resp = self
-            .graphql(PR_SEARCH_QUERY, json!({ "q": q, "limit": limit }))
-            .await?;
+        let nodes = paginate(limit, SEARCH_PAGE_SIZE, |first, after| async move {
+            let resp: Resp = self
+                .graphql(
+                    PR_SEARCH_QUERY,
+                    json!({ "q": q, "first": first, "after": after }),
+                )
+                .await?;
+            Ok(resp.search)
+        })
+        .await?;
 
         // Search returns a union; non-PR nodes come back as `{}`. Skip anything
         // that does not parse rather than failing the whole poll.
-        Ok(resp
-            .search
-            .nodes
+        Ok(nodes
             .into_iter()
             .filter_map(|n| serde_json::from_value::<RawPr>(n).ok())
             .filter(|p| p.number > 0)
@@ -208,6 +225,109 @@ impl Github {
             .filter(|p| p.number > 0)
             .collect())
     }
+}
+
+/// One page of a GraphQL search connection.
+#[derive(Debug, Deserialize)]
+struct SearchPage {
+    #[serde(default)]
+    nodes: Vec<serde_json::Value>,
+    #[serde(rename = "pageInfo")]
+    page_info: PageInfo,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PageInfo {
+    has_next_page: bool,
+    #[serde(default)]
+    end_cursor: Option<String>,
+}
+
+/// Drive a cursor-paged search until `limit` nodes are collected or the
+/// connection is exhausted. `fetch(first, after)` returns one page.
+///
+/// Stops on an empty page or a missing cursor even if `hasNextPage` claims
+/// otherwise, so a misbehaving response cannot spin the poller forever.
+async fn paginate<F, Fut>(
+    limit: u32,
+    page_size: u32,
+    mut fetch: F,
+) -> Result<Vec<serde_json::Value>>
+where
+    F: FnMut(u32, Option<String>) -> Fut,
+    Fut: std::future::Future<Output = Result<SearchPage>>,
+{
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    let mut after: Option<String> = None;
+
+    while (out.len() as u32) < limit {
+        let first = (limit - out.len() as u32).min(page_size.max(1));
+        let page = fetch(first, after.take()).await?;
+        let got = page.nodes.len();
+        out.extend(page.nodes);
+
+        match (page.page_info.has_next_page, page.page_info.end_cursor) {
+            (true, Some(cursor)) if got > 0 => after = Some(cursor),
+            _ => break,
+        }
+    }
+
+    out.truncate(limit as usize);
+    Ok(out)
+}
+
+fn is_retryable(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 502..=504)
+}
+
+/// The first `BODY_SNIPPET_CHARS` characters of a body, whitespace collapsed,
+/// so an HTML error page reads as one short line in the UI.
+fn body_snippet(body: &str) -> String {
+    let collapsed = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() > BODY_SNIPPET_CHARS {
+        let cut: String = collapsed.chars().take(BODY_SNIPPET_CHARS).collect();
+        format!("{cut}…")
+    } else {
+        collapsed
+    }
+}
+
+/// Turn a raw GraphQL HTTP response into its `data` value, or an error that
+/// names what actually went wrong (status, non-JSON body, GraphQL errors).
+fn parse_graphql_body(status: reqwest::StatusCode, body: &str) -> Result<serde_json::Value> {
+    if !status.is_success() {
+        let snippet = body_snippet(body);
+        return Err(if snippet.is_empty() {
+            anyhow!("GitHub returned {status}")
+        } else {
+            anyhow!("GitHub returned {status}: {snippet}")
+        });
+    }
+
+    let mut parsed: serde_json::Value = serde_json::from_str(body).map_err(|e| {
+        anyhow!(
+            "GitHub returned a non-JSON response ({status}): {e}: {}",
+            body_snippet(body)
+        )
+    })?;
+
+    // GraphQL reports partial failures with HTTP 200 and an `errors` array.
+    if let Some(errors) = parsed.get("errors").and_then(|e| e.as_array()) {
+        if !errors.is_empty() {
+            let msgs: Vec<String> = errors
+                .iter()
+                .filter_map(|e| e.get("message").and_then(|m| m.as_str()))
+                .map(|s| s.to_string())
+                .collect();
+            return Err(anyhow!("GitHub GraphQL error: {}", msgs.join("; ")));
+        }
+    }
+
+    parsed
+        .get_mut("data")
+        .map(serde_json::Value::take)
+        .ok_or_else(|| anyhow!("GitHub response had no data"))
 }
 
 /// Every place `gh` realistically lives, PATH first and then the known install
@@ -325,9 +445,22 @@ async fn gh_auth_token() -> Result<String> {
     ))
 }
 
+// Nested page sizes are a trade between completeness and staying under GitHub's
+// GraphQL timeout. Paging the search to 25 PRs is what bounds the cost; these
+// are sized from the live review queue (Nov 2026: up to 65 reviews, 48
+// threads and 34 check contexts on a single PR). Known truncation risks:
+// - `reviews(last: 50)`: the newest 50, which is what verdicts depend on (the
+//   old `first: 60` dropped the newest instead). A reviewer whose only verdict
+//   is older than that window loses it, and the viewer's own review older than
+//   the window will not hide a PR from their queue.
+// - `reviewThreads(last: 100)`: an unresolved thread older than the newest
+//   100 is missed, so the "unresolved conversations" blocker can under-report.
+// - `contexts(first: 50)`: a commit with more than 50 checks can hide a
+//   failing or pending one from the CI rollup, which is derived from these.
 const PR_SEARCH_QUERY: &str = r#"
-query($q: String!, $limit: Int!) {
-  search(query: $q, type: ISSUE, first: $limit) {
+query($q: String!, $first: Int!, $after: String) {
+  search(query: $q, type: ISSUE, first: $first, after: $after) {
+    pageInfo { hasNextPage endCursor }
     nodes {
       ... on PullRequest {
         number
@@ -349,10 +482,10 @@ query($q: String!, $limit: Int!) {
             }
           }
         }
-        reviews(first: 60) {
+        reviews(last: 50) {
           nodes { state submittedAt author { login } }
         }
-        reviewThreads(first: 100) {
+        reviewThreads(last: 100) {
           nodes { isResolved }
         }
         commits(last: 1) {
@@ -361,7 +494,7 @@ query($q: String!, $limit: Int!) {
               oid
               statusCheckRollup {
                 state
-                contexts(first: 40) {
+                contexts(first: 50) {
                   nodes {
                     ... on CheckRun { name status conclusion startedAt completedAt }
                     ... on StatusContext { context state createdAt }
@@ -645,4 +778,162 @@ pub struct ClosedPr {
     #[serde(default)]
     pub merged_at: Option<DateTime<Utc>>,
     pub repository: Repo,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::StatusCode;
+    use std::cell::RefCell;
+
+    const NGINX_502: &str = "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n";
+
+    #[test]
+    fn non_2xx_html_names_the_status_not_a_decode_error() {
+        let err = parse_graphql_body(StatusCode::BAD_GATEWAY, NGINX_502).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.starts_with("GitHub returned 502 Bad Gateway: <html> <head><title>502"),
+            "{msg}"
+        );
+        assert!(
+            !msg.contains('\n') && !msg.contains("expected value"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn long_bodies_are_truncated() {
+        let body = "x ".repeat(500);
+        let msg = format!(
+            "{:#}",
+            parse_graphql_body(StatusCode::SERVICE_UNAVAILABLE, &body).unwrap_err()
+        );
+        let snippet = msg.split(": ").nth(1).unwrap();
+        assert_eq!(snippet.chars().count(), BODY_SNIPPET_CHARS + 1);
+        assert!(snippet.ends_with('…'));
+    }
+
+    #[test]
+    fn non_2xx_with_empty_body_still_reads_cleanly() {
+        let msg = format!(
+            "{:#}",
+            parse_graphql_body(StatusCode::GATEWAY_TIMEOUT, "  ").unwrap_err()
+        );
+        assert_eq!(msg, "GitHub returned 504 Gateway Timeout");
+    }
+
+    #[test]
+    fn ok_status_with_non_json_body_quotes_a_snippet() {
+        let msg = format!(
+            "{:#}",
+            parse_graphql_body(StatusCode::OK, "<html>oops</html>").unwrap_err()
+        );
+        assert!(
+            msg.starts_with("GitHub returned a non-JSON response (200 OK)"),
+            "{msg}"
+        );
+        assert!(msg.ends_with("<html>oops</html>"), "{msg}");
+    }
+
+    #[test]
+    fn graphql_errors_and_data_are_handled() {
+        let err = parse_graphql_body(
+            StatusCode::OK,
+            r#"{"errors":[{"message":"a"},{"message":"b"}]}"#,
+        )
+        .unwrap_err();
+        assert_eq!(format!("{err:#}"), "GitHub GraphQL error: a; b");
+
+        let data = parse_graphql_body(StatusCode::OK, r#"{"data":{"x":1}}"#).unwrap();
+        assert_eq!(data, json!({ "x": 1 }));
+    }
+
+    #[test]
+    fn only_gateway_errors_are_retried() {
+        assert!(is_retryable(StatusCode::BAD_GATEWAY));
+        assert!(is_retryable(StatusCode::SERVICE_UNAVAILABLE));
+        assert!(is_retryable(StatusCode::GATEWAY_TIMEOUT));
+        assert!(!is_retryable(StatusCode::INTERNAL_SERVER_ERROR));
+        assert!(!is_retryable(StatusCode::UNAUTHORIZED));
+        assert!(!is_retryable(StatusCode::OK));
+    }
+
+    /// A fake search with `total` results, recording each `(first, after)`.
+    fn fake_search(
+        total: usize,
+        calls: &RefCell<Vec<(u32, Option<String>)>>,
+        first: u32,
+        after: Option<String>,
+    ) -> Result<SearchPage> {
+        calls.borrow_mut().push((first, after.clone()));
+        let start: usize = after.map(|c| c.parse().unwrap()).unwrap_or(0);
+        let end = (start + first as usize).min(total);
+        Ok(SearchPage {
+            nodes: (start..end).map(|i| json!(i)).collect(),
+            page_info: PageInfo {
+                has_next_page: end < total,
+                end_cursor: Some(end.to_string()),
+            },
+        })
+    }
+
+    fn run<F: std::future::Future>(f: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(f)
+    }
+
+    #[test]
+    fn paging_stops_when_the_search_runs_out() {
+        let calls = RefCell::new(Vec::new());
+        let out = run(paginate(100, 25, |first, after| {
+            std::future::ready(fake_search(57, &calls, first, after))
+        }))
+        .unwrap();
+        assert_eq!(out.len(), 57);
+        assert_eq!(
+            *calls.borrow(),
+            vec![(25, None), (25, Some("25".into())), (25, Some("50".into()))]
+        );
+    }
+
+    #[test]
+    fn paging_stops_at_the_limit_and_shrinks_the_last_page() {
+        let calls = RefCell::new(Vec::new());
+        let out = run(paginate(30, 25, |first, after| {
+            std::future::ready(fake_search(500, &calls, first, after))
+        }))
+        .unwrap();
+        assert_eq!(out.len(), 30);
+        assert_eq!(*calls.borrow(), vec![(25, None), (5, Some("25".into()))]);
+    }
+
+    #[test]
+    fn paging_does_not_spin_on_a_bogus_has_next_page() {
+        let calls = RefCell::new(0);
+        let out = run(paginate(100, 25, |_, _| {
+            *calls.borrow_mut() += 1;
+            std::future::ready(Ok(SearchPage {
+                nodes: vec![],
+                page_info: PageInfo {
+                    has_next_page: true,
+                    end_cursor: Some("same".into()),
+                },
+            }))
+        }))
+        .unwrap();
+        assert!(out.is_empty());
+        assert_eq!(*calls.borrow(), 1);
+    }
+
+    #[test]
+    fn paging_propagates_errors() {
+        let err = run(paginate(100, 25, |_, _| {
+            std::future::ready(Err::<SearchPage, _>(anyhow!("GitHub returned 502")))
+        }))
+        .unwrap_err();
+        assert_eq!(err.to_string(), "GitHub returned 502");
+    }
 }
