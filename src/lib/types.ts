@@ -56,6 +56,8 @@ export interface MinePr {
   createdAt: string;
   age: string;
   bucket: MineBucket;
+  /** Blocked or ready. Every open PR is listed; this marks the ones to act on. */
+  needsAttention: boolean;
   ci: Ci;
   review: ReviewState;
   reviewText: string;
