@@ -466,6 +466,7 @@ query($q: String!, $first: Int!, $after: String) {
         number
         title
         url
+        state
         createdAt
         updatedAt
         isDraft
@@ -528,6 +529,12 @@ pub struct RawPr {
     pub number: u64,
     pub title: String,
     pub url: String,
+    /// `OPEN`, `MERGED` or `CLOSED`. Fetched even though every search says
+    /// `is:open`, because the search index lags: a PR merged seconds ago can
+    /// still match `is:open` while its own `state` already reads `MERGED`.
+    /// Optional so a payload without it is taken at the search's word.
+    #[serde(default)]
+    pub state: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     #[serde(default)]

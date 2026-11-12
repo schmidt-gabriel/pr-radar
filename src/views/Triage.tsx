@@ -23,7 +23,8 @@ import {
 } from "../ui/atoms";
 
 type Selection =
-  | { side: "mine"; bucket: MineBucket | "all" }
+  | { side: "home" }
+  | { side: "mine"; bucket: MineBucket }
   | { side: "merged" }
   | { side: "queue"; bucket: QueueBucket | "all" };
 
@@ -38,7 +39,7 @@ const QUEUE_RAIL: QueueBucket[] = ["requested", "no_approval", "partial"];
 type Sort = "urgency" | "oldest";
 
 export default function Triage({ snap, prefs }: { snap: Snapshot; prefs: Prefs }) {
-  const [selection, setSelection] = useState<Selection>({ side: "mine", bucket: "all" });
+  const [selection, setSelection] = useState<Selection>({ side: "home" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>("urgency");
 
@@ -51,11 +52,10 @@ export default function Triage({ snap, prefs }: { snap: Snapshot; prefs: Prefs }
     let base: (MinePr | QueuePr)[];
     if (selection.side === "merged") {
       base = [];
+    } else if (selection.side === "home") {
+      base = snap.mine;
     } else if (selection.side === "mine") {
-      base =
-        selection.bucket === "all"
-          ? snap.mine
-          : snap.mine.filter((p) => p.bucket === selection.bucket);
+      base = snap.mine.filter((p) => p.bucket === selection.bucket);
     } else {
       base =
         selection.bucket === "all"
@@ -64,10 +64,19 @@ export default function Triage({ snap, prefs }: { snap: Snapshot; prefs: Prefs }
     }
 
     // createdAt is ISO-8601 in UTC, so a string compare is a date compare.
-    if (sort === "oldest") {
-      return [...base].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const sorted =
+      sort === "oldest"
+        ? [...base].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+        : base;
+
+    // Home draws one group per bucket, so the rows are laid out in that same
+    // order. Otherwise the auto-selected first row would not be the first one
+    // on screen once "oldest" reorders across buckets.
+    if (selection.side === "home") {
+      const mine = sorted as MinePr[];
+      return MINE_RAIL.flatMap((b) => mine.filter((p) => p.bucket === b));
     }
-    return base;
+    return sorted;
   }, [selection, snap.mine, queue, sort]);
 
   // Keep a sensible selection as data churns underneath.
@@ -84,17 +93,21 @@ export default function Triage({ snap, prefs }: { snap: Snapshot; prefs: Prefs }
   return (
     <div className="workspace">
       <nav className="rail">
+        {/* Home is every open PR you authored, one group per bucket. It does
+            not include the review queue: Home is your own work. The Mine
+            entries below are the same PRs, one bucket at a time. */}
         <div className="section">
-          <div className="eyebrow">Mine</div>
-          {/* Lists every open PR, not just the ones needing attention. The
-              blocked and ready rails below are the attention subset. */}
           <RailItem
-            label="All open"
+            label="Home"
             count={snap.mine.length}
             state="none"
-            selected={selection.side === "mine" && selection.bucket === "all"}
-            onClick={() => setSelection({ side: "mine", bucket: "all" })}
+            selected={selection.side === "home"}
+            onClick={() => setSelection({ side: "home" })}
           />
+        </div>
+
+        <div className="section">
+          <div className="eyebrow">Mine</div>
           {MINE_RAIL.map((b) => {
             const n = snap.mine.filter((p) => p.bucket === b).length;
             if (n === 0 && b === "draft") return null;
@@ -165,7 +178,7 @@ export default function Triage({ snap, prefs }: { snap: Snapshot; prefs: Prefs }
           ) : (
             <MineList
               items={rows as MinePr[]}
-              grouped={selection.bucket === "all" && sort === "urgency"}
+              grouped={selection.side === "home"}
               selectedId={selectedId}
               onSelect={setSelectedId}
             />
@@ -216,22 +229,24 @@ function Header({
   onToggleSort: () => void;
 }) {
   const title =
-    selection.side === "merged"
-      ? "Recently merged"
-      : selection.side === "mine"
-        ? selection.bucket === "all"
-          ? "All open PRs"
-          : MINE_BUCKET_LABEL[selection.bucket]
-        : selection.bucket === "all"
-          ? "Review queue"
-          : QUEUE_BUCKET_LABEL[selection.bucket];
+    selection.side === "home"
+      ? "Home"
+      : selection.side === "merged"
+        ? "Recently merged"
+        : selection.side === "mine"
+          ? MINE_BUCKET_LABEL[selection.bucket]
+          : selection.bucket === "all"
+            ? "Review queue"
+            : QUEUE_BUCKET_LABEL[selection.bucket];
 
   const sub =
-    selection.side === "mine"
-      ? `${snap.mineCounts.blocked} blocked · ${snap.mineCounts.ready} ready`
-      : selection.side === "queue"
-        ? `${shown} need a human · ${snap.hidden.alreadyApproved + snap.hidden.alreadyReviewed} hidden`
-        : `last ${shown}`;
+    selection.side === "home"
+      ? `${shown} open · ${snap.mineCounts.blocked} blocked · ${snap.mineCounts.ready} ready`
+      : selection.side === "mine"
+        ? `${snap.mineCounts.blocked} blocked · ${snap.mineCounts.ready} ready`
+        : selection.side === "queue"
+          ? `${shown} need a human · ${snap.hidden.alreadyApproved + snap.hidden.alreadyReviewed} hidden`
+          : `last ${shown}`;
 
   return (
     <div className="center-head">
@@ -255,9 +270,10 @@ function Header({
 }
 
 /**
- * `grouped` splits the full list into what needs attention and everything
- * else. The backend already sorts attention first and marks each PR, so this
- * only draws a heading where the flag flips; it decides nothing.
+ * `grouped` is Home: one group per bucket, in rail order, using the bucket the
+ * backend decided. The buckets are exclusive, so each PR appears once. Empty
+ * buckets are left out. The rows arrive already laid out bucket by bucket, so
+ * this only draws the headings; it decides nothing.
  */
 function MineList({
   items,
@@ -281,30 +297,22 @@ function MineList({
     return <MineRows items={items} selectedId={selectedId} onSelect={onSelect} />;
   }
 
-  const attention = items.filter((p) => p.needsAttention);
-  const other = items.filter((p) => !p.needsAttention);
   return (
     <>
-      {attention.length > 0 && (
-        <>
-          <div className="group-head">
-            <Dot state="blocked" />
-            <span className="label">Needs attention</span>
-            <span className="n">{attention.length}</span>
+      {MINE_RAIL.map((b) => {
+        const group = items.filter((p) => p.bucket === b);
+        if (group.length === 0) return null;
+        return (
+          <div key={b}>
+            <div className="group-head">
+              <Dot state={b} />
+              <span className="label">{MINE_BUCKET_LABEL[b]}</span>
+              <span className="n">{group.length}</span>
+            </div>
+            <MineRows items={group} selectedId={selectedId} onSelect={onSelect} />
           </div>
-          <MineRows items={attention} selectedId={selectedId} onSelect={onSelect} />
-        </>
-      )}
-      {other.length > 0 && (
-        <>
-          <div className="group-head">
-            <Dot state="none" />
-            <span className="label">Other open PRs</span>
-            <span className="n">{other.length}</span>
-          </div>
-          <MineRows items={other} selectedId={selectedId} onSelect={onSelect} />
-        </>
-      )}
+        );
+      })}
     </>
   );
 }

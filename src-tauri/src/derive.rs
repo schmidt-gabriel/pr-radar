@@ -299,11 +299,19 @@ pub fn needs_attention(bucket: MineBucket) -> bool {
     matches!(bucket, MineBucket::Blocked | MineBucket::Ready)
 }
 
-/// Every open PR the `author:@me` search returned, attention first. Nothing is
-/// dropped here: the views list all of them.
+/// The search index can still return a PR as `is:open` for a while after it
+/// merged or closed. The PR's own `state` is current, so it has the last word.
+fn is_open(pr: &RawPr) -> bool {
+    !matches!(pr.state.as_deref(), Some(s) if s != "OPEN")
+}
+
+/// Every open PR the `author:@me` search returned, attention first. Only PRs
+/// that are no longer open are dropped; the views list all the rest. Merged
+/// PRs live in their own list (`derive_merged`), never here.
 pub fn derive_mine(prs: &[RawPr], now: DateTime<Utc>) -> Vec<MinePr> {
     let mut out: Vec<MinePr> = prs
         .iter()
+        .filter(|pr| is_open(pr))
         .map(|pr| {
             let checks = build_checks(pr.check_contexts());
             let ci = build_ci(&checks);
@@ -1048,6 +1056,24 @@ mod tests {
                 (1, MineBucket::Draft, false),
             ]
         );
+    }
+
+    #[test]
+    fn merged_and_closed_prs_never_reach_mine() {
+        // Home renders `mine`, so this is the guarantee that a merged PR never
+        // shows there, even when a lagging search index still calls it open.
+        let prs = vec![
+            raw_pr(1, serde_json::json!({ "state": "OPEN" })),
+            raw_pr(2, serde_json::json!({ "state": "MERGED" })),
+            raw_pr(3, serde_json::json!({ "state": "CLOSED" })),
+            raw_pr(4, serde_json::json!({})),
+        ];
+        let numbers: Vec<u64> = derive_mine(&prs, Utc::now())
+            .iter()
+            .map(|p| p.number)
+            .collect();
+        assert_eq!(numbers.len(), 2);
+        assert!(numbers.contains(&1) && numbers.contains(&4));
     }
 
     #[test]

@@ -17,7 +17,7 @@ Requires Rust 1.77.2+, Node 22+, and the GitHub CLI logged in.
 npm run app        # dev build with frontend hot reload
 npm run app:build  # bundle installers
 npm run build      # frontend only; runs tsc, so this is the type check
-npm test           # cargo test (23 tests, in derive.rs and github.rs)
+npm test           # cargo test (24 tests, in derive.rs and github.rs)
 cd src-tauri && cargo run --example snapshot            # readable dump from live GitHub
 cd src-tauri && cargo run --example snapshot -- --json  # the exact UI payload
 ```
